@@ -2,6 +2,7 @@
 #include<netdb.h>
 #include<stdlib.h>
 #include<string.h>
+#include"SDL2/SDL.h"
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
@@ -12,12 +13,13 @@
 #define PlayerNum 2
 int socket_listen;// 监听的套接字
 int Player_socket[PlayerNum];// 服务于 player 的套接字
+fd_set set;
 void WaitForConnection();
+void ExchangeMessage();
 int main(){
     WaitForConnection();
-    while(1){
-        select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[]+1,)
-    }
+    ExchangeMessage();
+    close(socket_listen);
 }
 void WaitForConnection(){
     struct addrinfo *result,hints;
@@ -57,4 +59,43 @@ void WaitForConnection(){
         printf("Connection with Player%d successfully\n",i+1);
     }
     
+}
+
+void ExchangeMessage(){
+    FD_ZERO(&set);
+    for(int i=0;i<PlayerNum;i++){
+        FD_SET(Player_socket[i],&set);
+    }
+    fd_set readset=set;
+    SDL_Event buf;
+    while(1){
+        if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,NULL)>0){
+            for(int i=0;i<PlayerNum;i++){
+                if(FD_ISSET(Player_socket[i])){
+                    if(recv(Player_socket[i],&buf,sizeof(SDL_Event),0)==0){
+                        fprintf(stderr,"Player%d disconnected\n ",i+1);
+                        for(int i=0;i<PlayerNum;i++){
+                            close(Player_socket[i]);
+                        }
+                        break;
+                    }
+                    if(recv(Player_socket[i],&buf,sizeof(SDL_Event),0)==-1){
+                        fprintf(stderr,"recv Player%d fail\n",~i+1);
+                    }
+                    if(send(Player_socket[~i],&buf,sizeof(SDL_Event),0)==0){
+                        fprintf(stderr,"Player%d\n disconnected",i+1);
+                        for(int i=0;i<PlayerNum;i++){
+                            close(Player_socket[i]);
+                        }
+                        break;
+                    }
+                    if(send(Player_socket[~i],&buf,sizeof(SDL_Event),0)==-1){
+                        fprintf(stderr,"send to Player%d fail\n",~i+1);
+                    }
+                    
+                    memset(&buf,0,sizeof(SDL_Event));
+                }
+            }
+        }
+    }
 }
