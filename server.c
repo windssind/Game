@@ -7,18 +7,20 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #define PORT "8080"
 #define SERVER_IP NULL
-#define MaxExcutable 2
+#define MaxExcutable 100
 #define PlayerNum 2
 int socket_listen;// 监听的套接字
 int Player_socket[PlayerNum];// 服务于 player 的套接字
+int recvbytes,sendbytes;
 fd_set set;
 void WaitForConnection();
 void ExchangeMessage();
 int main(){
     WaitForConnection();
-    ExchangeMessage();
+    /*ExchangeMessage();*/
     close(socket_listen);
 }
 void WaitForConnection(){
@@ -58,6 +60,16 @@ void WaitForConnection(){
         }
         printf("Connection with Player%d successfully\n",i+1);
     }
+    char Established[MaxExcutable];
+    for(int i=0;i<PlayerNum;i++){//发送连接成功的消息
+        sprintf(Established,"Connection Established,you are the Player%c",i+1+'0');
+        sendbytes=send(Player_socket[i],Established,strlen(Established)+1,0);// strlen+1，可以把/0也穿过去
+        printf("%d",sendbytes);
+        if(sendbytes==-1){
+            fprintf(stderr,"Though Connection Established,the good news failed");
+            exit(1);
+        }
+    }
     
 }
 
@@ -71,25 +83,27 @@ void ExchangeMessage(){
     while(1){
         if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,NULL)>0){
             for(int i=0;i<PlayerNum;i++){
-                if(FD_ISSET(Player_socket[i])){
-                    if(recv(Player_socket[i],&buf,sizeof(SDL_Event),0)==0){
+                if(FD_ISSET(Player_socket[i],&set)){
+                    recvbytes=recv(Player_socket[i],&buf,sizeof(SDL_Event),0);
+                    if(recvbytes==0){
                         fprintf(stderr,"Player%d disconnected\n ",i+1);
                         for(int i=0;i<PlayerNum;i++){
                             close(Player_socket[i]);
                         }
                         break;
                     }
-                    if(recv(Player_socket[i],&buf,sizeof(SDL_Event),0)==-1){
+                    if(recvbytes==-1){
                         fprintf(stderr,"recv Player%d fail\n",~i+1);
                     }
-                    if(send(Player_socket[~i],&buf,sizeof(SDL_Event),0)==0){
+                    sendbytes=send(Player_socket[~i],&buf,sizeof(SDL_Event),0);
+                    if(sendbytes==0){
                         fprintf(stderr,"Player%d\n disconnected",i+1);
                         for(int i=0;i<PlayerNum;i++){
                             close(Player_socket[i]);
                         }
                         break;
                     }
-                    if(send(Player_socket[~i],&buf,sizeof(SDL_Event),0)==-1){
+                    if(sendbytes==-1){
                         fprintf(stderr,"send to Player%d fail\n",~i+1);
                     }
                     
