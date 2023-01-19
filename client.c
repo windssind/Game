@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include<netdb.h>
+#include<math.h>
 #define MaxExcutable 100
 #define Width 30
 #define Length 60
@@ -25,7 +26,8 @@ typedef struct Ball{
     int dy;
     int x;
     int y;
-    int radius
+    int radius;
+    struct Ball *next;
 }Ball;
 typedef struct Board{
     int dx;
@@ -43,6 +45,7 @@ TTF_Font *font;
 SDL_Color FontColor={0,0,0,255};
 const int Window_Width=Length*13;
 const int Window_Depth=20*Width;
+int client_socket;
 void BuildConnection(int argc,char *argv[]);
 void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
@@ -50,16 +53,15 @@ void Load();
 void Update();
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
+void RenderDrawCircle(int x,int y,int radius);
 int main(int argc,char *argv[]){
     BuildConnection(argc,argv);
     InitAll();
     while(true){
         Update();
-        Move(P1);
-        Move(P2);
-        Hitcheck();
-        Win();
-        Lose();
+        MoveBoard();
+        MoveBall();
+        IsGameOver();
     }
     void Quit();
     
@@ -75,7 +77,7 @@ void BuildConnection(int argc,char *argv[]){
         fprintf(stderr,"getaddrinfo failed\n");
         exit(1);
     }
-    int client_socket=socket(result->ai_family,result->ai_socktype,result->ai_protocol);
+    client_socket=socket(result->ai_family,result->ai_socktype,result->ai_protocol);
     if(client_socket==-1){
         fprintf(stderr,"creat a socket failed\n");
         exit(1);
@@ -136,6 +138,7 @@ void Update(){
     DrawMap();
     DrawBall();
     DrawBoard();
+    SDL_RenderPresent(Renderer);
 }
 
 void Draw(SDL_Surface *surface,int x,int y,int w,int h){
@@ -153,8 +156,118 @@ void DrawMap(){
 }
 void DrawBall(){
     // Load中记得使用SDL_SetRenderDrawColor来设置render的颜色
+    RenderDrawCircle();
 }
 
 void DrawBoard(){
     Draw(.......);
+}
+void RenderDrawCircle(int x,int y,int radius){
+    for(float degree=0;degree<M_PI;degree+=0.1){
+        int x1=x+cos(degree)*radius;
+        int y1=y+sin(degree)*radius;
+        int x2=x+cos(degree+0.1)*radius;
+        int y2=y+cos(degree+0.1)*radius;
+        SDL_RenderDrawLine(Renderer,x1,y1,x2,y2);
+    }
+}
+
+void MoveBoard(){
+    SDL_Event event;
+    if(borad.type==1){//就是自己
+        if(!SDL_PollEvent(&event)){
+            return ;
+        }
+    }else{
+        int rc=recv(client_socket,&event,sizeof(SDL_Event),MSG_DONTWAIT);
+        if(rc==){
+            return ;
+        }
+    }
+    switch(event.type){
+                case SDL_QUIT:
+                    Quit();
+                    break;
+                case SDL_KEYDOWN:
+                    switch (event.key.keysym.sym){
+                        case SDLK_LEFT:
+                            board.x-=board.dx;
+                            break;
+                        case SDLK_RIGHT:
+                            board.x+=board.dx;
+                            break;
+                    case SDLK_UP:
+                        board.y-=board.dy;
+                        break;
+                    case SDLK_DOWN:
+                        board.y+=board.dy;
+                        break;
+                    default:
+                        break;
+                }   
+        }SDL_USEREVENT
+}
+
+void MoveBall(){
+    if(ball.x+ball.radius>=.......||ball.x-ball.radius<=){
+        // 左边碰撞
+    }else if(){
+        // 右边碰撞
+    }else if(){
+        // 下边碰撞
+    }else if(){
+        // 上边碰撞？(和砖块碰撞，有点复杂)
+        HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
+    }
+    ball.x+=ball.dx;
+    ball.y+=ball.dy;
+}
+
+void Hitbrick(){
+    ChangeColor();
+    ElementalAttack();
+    DestroyBrick();
+    GetPower();
+}
+ void GetPower(){
+    if(.....全局变量维护){
+        // 连击数到达一定的combo就可以触发释放额外的小球(所以小球应该是malloc出来的)
+        //利用SDL_Addtimer来定时，到了时间节点时候就closetimer，并且用一个全局变量
+    }
+    if(......){// 到达一定的combo数两个效果触发一个
+
+    }
+    if(.....){//场上方块数量很少
+
+    }
+ }
+Ball *CreatLinkedList(){
+    Ball *HeadNode=(Ball*)malloc(sizeof(Ball));
+    HeadNode->next=NULL;
+    return HeadNode;
+}
+Ball *CreatBall(Ball *HeadNode,int x,int y,Board board){//用链表结构
+    Ball *newBall=(Ball*)malloc(sizeof(Ball));
+    newBall->x=x;
+    newBall->y=y;
+    newBall->dx=board.dx;
+    newBall->dy=......;// 还没决定好
+    newBall->radius=.......;
+    //次序不重要，直接用头插法就行了
+    Ball *tmp=HeadNode->next;
+    HeadNode->next=newBall;
+    newBall->next=tmp;
+}
+void DeleteBall(Ball *headNode,Ball *DesertedBall){
+    if(ballNum==1){
+        return ;
+    }else{
+        Ball *tmp=headNode;
+        while(tmp->next!=DesertedBall){
+            tmp=tmp->next;
+        }
+        // 到这一步
+        tmp->next=DesertedBall->next;
+        free(DesertedBall);
+    }
 }
