@@ -6,6 +6,12 @@
 #define Length 60
 #define Col 8
 #define Row 8
+#define UP 1
+#define LEFT 2
+#define DOWN 3
+#define RIGHT 4
+#define MaxHp 4
+#define FPS 50
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
 #include"SDL2/SDL_ttf.h"
@@ -30,6 +36,7 @@ typedef struct Ball{
     struct Ball *next;
 }Ball;
 typedef struct Board{
+    enum Element element;
     int dx;
     int dy;
     int x;
@@ -37,7 +44,7 @@ typedef struct Board{
     int w;
     int h;
 }Board;
-
+Board Myself,The_other;
 Brick map[Row][Col];
 SDL_Window *Window=NULL;
 SDL_Renderer *Renderer=NULL;
@@ -46,6 +53,7 @@ SDL_Color FontColor={0,0,0,255};
 const int Window_Width=Length*13;
 const int Window_Depth=20*Width;
 int client_socket;
+int level;
 void BuildConnection(int argc,char *argv[]);
 void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
@@ -54,16 +62,18 @@ void Update();
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void RenderDrawCircle(int x,int y,int radius);
+void AnalyseMSG();
 int main(int argc,char *argv[]){
     BuildConnection(argc,argv);
     InitAll();
     while(true){
         Update();
         MoveBoard();
+        AnalyseMSG();
         MoveBall();
         IsGameOver();
     }
-    void Quit();
+    Quit();
     
 }
 void BuildConnection(int argc,char *argv[]){
@@ -109,7 +119,7 @@ void InitAll(){
     Renderer=SDL_CreateRenderer(Window,-1,SDL_RENDERER_ACCELERATED);
     font=TTF_OpenFont(,25);
     Load();
-    InitMap();
+    InitMap(1);
 }
 
 /*void PaintFont(const char *text,int x,int y,int w,int h){
@@ -138,6 +148,12 @@ void Update(){
     DrawMap();
     DrawBall();
     DrawBoard();
+    if(....){
+        DrawWall();
+    }
+    if(....){
+        DrawBullet();
+    }
     SDL_RenderPresent(Renderer);
 }
 
@@ -156,7 +172,10 @@ void DrawMap(){
 }
 void DrawBall(){
     // Load中记得使用SDL_SetRenderDrawColor来设置render的颜色
-    RenderDrawCircle();
+    Ball *tmp=HeadNode->next;
+    while(tmp!=NULL){
+        RenderDrawCircle();
+    }
 }
 
 void DrawBoard(){
@@ -174,53 +193,67 @@ void RenderDrawCircle(int x,int y,int radius){
 
 void MoveBoard(){
     SDL_Event event;
-    if(borad.type==1){//就是自己
-        if(!SDL_PollEvent(&event)){
-            return ;
-        }
-    }else{
-        int rc=recv(client_socket,&event,sizeof(SDL_Event),MSG_DONTWAIT);
-        if(rc==){
-            return ;
-        }
-    }
-    switch(event.type){
-                case SDL_QUIT:
-                    Quit();
-                    break;
-                case SDL_KEYDOWN:
-                    switch (event.key.keysym.sym){
-                        case SDLK_LEFT:
-                            board.x-=board.dx;
-                            break;
-                        case SDLK_RIGHT:
-                            board.x+=board.dx;
-                            break;
-                    case SDLK_UP:
-                        board.y-=board.dy;
+    int MSG;
+    while(SDL_PollEvent(&event)){
+        const Uint8 *state= SDL_GetKeyboardState(NULL);
+        if(event.type == SDL_KEYDOWN || event.type == SDL_KEYUP){
+            if ((state[SDL_SCANCODE_UP]||state[SDL_SCANCODE_W])&& (!(state[SDL_SCANCODE_DOWN]||state[SDL_SCANCODE_S]))){
+                board.y-=dy;
+                MSG=UP;
+            }else if((!(state[SDL_SCANCODE_UP]||state[SDL_SCANCODE_W]))&&(state[SDL_SCANCODE_DOWN]||state[SDL_SCANCODE_S])){
+                board.y+=dy;
+                MSG=DOWN;
+            }else if((state[SDL_SCANCODE_LEFT]||state[SDL_SCANCODE_A])&&(!(state[SDL_SCANCODE_RIGHT]||state[SDL_SCANCODE_D]))){
+                board.x-=dx;
+                MSG=LEFT;
+            }else if((!(state[SDL_SCANCODE_LEFT]||state[SDL_SCANCODE_A]))&&(state[SDL_SCANCODE_RIGHT]||state[SDL_SCANCODE_D])){
+                board.x+=dx;
+                MSG=RIGHT;
+            }else{
+                switch (event.key.keysym.sym){
+                    case SDLK_ESCAPE:
+                        Quit();
                         break;
-                    case SDLK_DOWN:
-                        board.y+=board.dy;
-                        break;
+                    case SDL_Quit:
+                        Quit();
                     default:
                         break;
-                }   
-        }SDL_USEREVENT
+                }
+                return ;
+            }
+            if(send(client_socket,&MSG,sizeof(int),0)==-1){
+                fprintf(stderr,"send MSG fail");
+                return ;
+            }
+        }
+    }
 }
 
-void MoveBall(){
-    if(ball.x+ball.radius>=.......||ball.x-ball.radius<=){
-        // 左边碰撞
-    }else if(){
+
+void MoveBall(){//有三种碰撞检测，撞边界，撞板，撞砖块
+    Ball *tmp=HeadNode->next;
+    while(tmp!=NULL){
+        if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Length*13){// 左边碰撞或者右边碰撞
+            tmp->dx=-tmp->dx;
+        }else if(){
         // 右边碰撞
     }else if(){
         // 下边碰撞
+        if(有墙壁){
+
+        }else{// 没有墙壁
+            
+        }
     }else if(){
         // 上边碰撞？(和砖块碰撞，有点复杂)
         HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
     }
-    ball.x+=ball.dx;
-    ball.y+=ball.dy;
+    Ball *tmp=HeadNode->next;
+    while(tmp!=NULL){
+        tmp->x+=dx;
+        tmp->y+=dy;
+        tmp=tmp->next;
+    }
 }
 
 void Hitbrick(){
@@ -233,12 +266,13 @@ void Hitbrick(){
     if(.....全局变量维护){
         // 连击数到达一定的combo就可以触发释放额外的小球(所以小球应该是malloc出来的)
         //利用SDL_Addtimer来定时，到了时间节点时候就closetimer，并且用一个全局变量
+        CreatBall();
     }
     if(......){// 到达一定的combo数两个效果触发一个
-
+        CreatWall();
     }
     if(.....){//场上方块数量很少
-
+        CreatBullet();
     }
  }
 Ball *CreatLinkedList(){
@@ -271,3 +305,37 @@ void DeleteBall(Ball *headNode,Ball *DesertedBall){
         free(DesertedBall);
     }
 }
+
+void AnalyseMSG(){
+    int recvMSG;
+    recv(client_socket,&recvMSG,sizeof(int),MSG_DONTWAIT);// 有个问题，send和recv是隶属于不同的流的吗
+    switch (recvMSG){
+    case UP:
+        The_other.y-=The_other.dy;
+        break;
+    case DOWN:
+        The_other.y+=The_other.dy;
+        break;
+    case LEFT:
+        The_other.x-=The_other.dx;
+        break;
+    case RIGHT:
+        The_other.x+=The_other.dx;
+        break;
+    default:
+        break;
+    }
+}
+
+void InitMap_1(){
+    for(int i=0;i<Row;i++){
+        for(int j=0;j<Col;j++){
+            map[i][j].HP=MaxHp;
+            map[i][j].element=rand()%5;
+            map[i][j].status=1;
+        }
+    }
+}
+
+// 可以使用Timer函数来代替SDL——delay
+// 判断元素反应，用音效来区分
