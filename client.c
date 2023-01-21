@@ -2,8 +2,7 @@
 #include<netdb.h>
 #include<math.h>
 #define MaxExcutable 100
-#define Width 30
-#define Length 60
+#define Block 40
 #define Col 8
 #define Row 8
 #define UP 1
@@ -44,35 +43,45 @@ typedef struct Board{
     int w;
     int h;
 }Board;
-Board Myself,The_other;
+typedef struct Location{
+    int x;
+    int y;
+}Location;
+
+Board board[2];
 Brick map[Row][Col];
 SDL_Window *Window=NULL;
 SDL_Renderer *Renderer=NULL;
 TTF_Font *font;
 SDL_Color FontColor={0,0,0,255};
-const int Window_Width=Length*13;
-const int Window_Depth=20*Width;
+const int Window_Width=Block*15;
+const int Window_Depth=Block*18;
 int client_socket;
 int level;
+int Timer_ID[5];
 void BuildConnection(int argc,char *argv[]);
 void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
 void Load();
-void Update();
+Uint32 Update(int interval,void *param);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void RenderDrawCircle(int x,int y,int radius);
-void AnalyseMSG();
+int isHitBrick(int x,int y);
+Uint32 AnalyseMSG(int interval,void *param);
+Uint32 MoveBoard(int interval,void *param);
+Uint32 MoveBall(int interval,void *param);
+SDL_Surface *BrickSurface[5];
+SDL_Texture *BrickTexture[5];
+SDL_Surface *BallSurface[5];
+SDL_Texture *BallTexture[5];
+void closeTimer();
 int main(int argc,char *argv[]){
     BuildConnection(argc,argv);
     InitAll();
-    while(true){
-        Update();
-        MoveBoard();
-        AnalyseMSG();
-        MoveBall();
-        IsGameOver();
-    }
+    beginTimer();
+    while(!IsGameOver());
+    closeTimer();
     Quit();
     
 }
@@ -109,7 +118,7 @@ void BuildConnection(int argc,char *argv[]){
     return;
 }
 void InitAll(){
-    SDL_Init(SDL_INIT_VIDEO);//初始化
+    SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER);//初始化
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
     Window=SDL_CreateWindow("Sheep",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,Window_Width,Window_Depth,SDL_WINDOW_SHOWN);
@@ -143,7 +152,7 @@ void InitMap(int level){
     }
 }
 
-void Update(){
+Uint32 Update(Uint32 interval,void *param){
     SDL_RenderClear(Renderer);
     DrawMap();
     DrawBall();
@@ -155,6 +164,7 @@ void Update(){
         DrawBullet();
     }
     SDL_RenderPresent(Renderer);
+    return interval;
 }
 
 void Draw(SDL_Surface *surface,int x,int y,int w,int h){
@@ -166,7 +176,7 @@ void Draw(SDL_Surface *surface,int x,int y,int w,int h){
 void DrawMap(){
     for(int i=0;i<Row;i++){
         for(int j=0;j<Col;j++){
-            Draw(..........);
+            Draw(BrickSurface[rand()%5],Block*Col,Block*Row,Block,Block);
         }
     }
 }
@@ -174,20 +184,13 @@ void DrawBall(){
     // Load中记得使用SDL_SetRenderDrawColor来设置render的颜色
     Ball *tmp=HeadNode->next;
     while(tmp!=NULL){
-        RenderDrawCircle();
+        Draw(,tmp->x,tmp->y,tmp->radius*2,tmp->radius*2);
     }
 }
 
 void DrawBoard(){
-    Draw(.......);
-}
-void RenderDrawCircle(int x,int y,int radius){
-    for(float degree=0;degree<M_PI;degree+=0.1){
-        int x1=x+cos(degree)*radius;
-        int y1=y+sin(degree)*radius;
-        int x2=x+cos(degree+0.1)*radius;
-        int y2=y+cos(degree+0.1)*radius;
-        SDL_RenderDrawLine(Renderer,x1,y1,x2,y2);
+    for(int i=0;i<2;i++){
+        Draw( ,board[i].x,board[i].y,board[i].w,board[i].h);
     }
 }
 
@@ -230,33 +233,32 @@ void MoveBoard(){
 }
 
 
-void MoveBall(){//有三种碰撞检测，撞边界，撞板，撞砖块
+Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，撞板，撞砖块
     Ball *tmp=HeadNode->next;
     while(tmp!=NULL){
-        if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Length*13){// 左边碰撞或者右边碰撞
+        if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Block*15){// 左边碰撞或者右边碰撞
             tmp->dx=-tmp->dx;
-        }else if(){
-        // 右边碰撞
-    }else if(){
-        // 下边碰撞
-        if(有墙壁){
-
-        }else{// 没有墙壁
-            
+        }else if(tmp->y-tmp->radius<=0){// 上边碰撞
+            tmp->dy=-tmp->dy;
+        }else if(){// 下边碰撞
+            if(有墙壁){
+                
+            }else{// 没有墙壁
+                DeleteBall(tmp);
+            }
+        }else if(isHitBrick(tmp->x,tmp->y)){//(和砖块碰撞，有点复杂)
+            HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
         }
-    }else if(){
-        // 上边碰撞？(和砖块碰撞，有点复杂)
-        HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
-    }
-    Ball *tmp=HeadNode->next;
-    while(tmp!=NULL){
         tmp->x+=dx;
         tmp->y+=dy;
-        tmp=tmp->next;
+        tmp=tmp->next;// 有bug，如果delete了，就会有问题
     }
+    
+    return interval;
 }
 
 void Hitbrick(){
+    if(is)
     ChangeColor();
     ElementalAttack();
     DestroyBrick();
@@ -280,13 +282,13 @@ Ball *CreatLinkedList(){
     HeadNode->next=NULL;
     return HeadNode;
 }
-Ball *CreatBall(Ball *HeadNode,int x,int y,Board board){//用链表结构
+Ball *CreatBall(Ball *HeadNode,int x,int y){//用链表结构
     Ball *newBall=(Ball*)malloc(sizeof(Ball));
     newBall->x=x;
     newBall->y=y;
-    newBall->dx=board.dx;
-    newBall->dy=......;// 还没决定好
-    newBall->radius=.......;
+    newBall->dx=0;
+    newBall->dy=15;// 还没决定好
+    newBall->radius=10;
     //次序不重要，直接用头插法就行了
     Ball *tmp=HeadNode->next;
     HeadNode->next=newBall;
@@ -337,5 +339,58 @@ void InitMap_1(){
     }
 }
 
-// 可以使用Timer函数来代替SDL——delay
+void beginTimer(){
+    Timer_ID[0]=SDL_AddTimer(FPS,Update,NULL);
+    Timer_ID[1]=SDL_AddTimer(FPS,MoveBall,NULL);
+    Timer_ID[2]=SDL_AddTimer(FPS,MoveBoard,NULL);
+    Timer_ID[3]=SDL_AddTimer(FPS,AnalyseMSG,NULL);
+}
+
+void closeTimer(){
+    for(int i=0;i<4;i++){
+        SDL_RemoveTimer(i);
+    }
+    
+}
+
+void Load(){
+    char BrickImageName[30];
+    char BallImageName[30];
+    for(int i=0;i<4;i++){
+        sprintf(BrickImageName,"/Image/Brick%d",i+1);
+        BrickSurface[i]=IMG_Load(BrickImageName);
+        sprintf(BallImageName,"/Image/Ball%d",i+1);
+        BallSurface[i]=IMG_Load(BallImageName);
+        memset(BrickImageName,0,sizeof BrickImageName);
+        memset(BallImageName,0,sizeof BallImageName);
+    }
+}
+
+
+// 可以使用Timer函数来代替SDL——delay(是必须，用SDL_Addtimer),update,move
 // 判断元素反应，用音效来区分
+
+int HitBrick(int x,int y,Ball *ball){
+    Location location;
+    int col=x/Block+1;
+    int row=y/Block+1;
+    if(col>=0&&col<=Col+1&&row>=0&&row<=Row+1){// 有碰撞的可能
+        if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)){//上边碰撞
+            location.x=col;
+            location.y=row-1;
+            ball->dy=-ball->dy;
+        }else if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y+ball->radius>=Block*(row+1)){// 下边碰撞
+            location.x=col;
+            location.y=row+1;
+            ball->dy=-ball->dy;
+        }else if(ball->y>=Block*(row-1)&&ball->y<=Block*row&&ball->x-ball->radius<=Block*(col-1)){
+            location.x=col-1;
+            location.y=row;
+            ball->dx=-ball->dx;
+        }else if(ball->y>=Block*(row-1)&&ball->y<=Block*row&&ball->x+ball->radius>=Block*(col+1)){
+            location.x=col+1;
+            location.y=row;
+            ball->dx=-ball->dx;
+        }
+    }
+}
