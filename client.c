@@ -69,6 +69,7 @@ void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void HitBrick(int x,int y);
 void ChangeColor(Ball *ball);
+int IsHitBoard(Ball *ball,Board *board);
 Uint32 AnalyseMSG(int interval,void *param);
 Uint32 MoveBoard(int interval,void *param);
 Uint32 MoveBall(int interval,void *param);
@@ -247,7 +248,9 @@ Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，
             }else{// 没有墙壁
                 DeleteBall(tmp);
             }
-        }else if(isHitBrick(tmp->x,tmp->y)){//(和砖块碰撞，有点复杂)
+        }else if(HitBoard(tmp,board)){ // 和board相碰
+            
+        }else{//(和砖块碰撞，有点复杂)
             HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
         }
         tmp->x+=dx;
@@ -259,7 +262,6 @@ Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，
 }
 
 void Hitbrick(){
-    ChangeColor();
     ElementalAttack();
     DestroyBrick();
     GetPower();
@@ -400,17 +402,78 @@ void HitBrick(int x,int y,Ball *ball){
     }
 }
 
-void ChangeColor(Ball *ball,Location location){
-    if(map[location.y][location.x].element==normal){
-        map[location.y][location.x].element=ball->element;
-    }
-}
 
 void ElementAttack(Ball *ball,Location location){
     // 火和水，火和雷，火和冰双倍
-    // 水和雷 十字伤害
+    // 水和雷 九宫格伤害
     // 雷和冰，直接去世
-    if(ball->element==fire&&(ball->element==water||ball->element==thunder||ball->element==ice)){
-
+    Brick *ToBeAttacked=&map[location.y][location.x];
+    if(ToBeAttacked->element==fire){// 砖块是火元素
+        if(ball->element==water||ball->element==thunder||ball->element==ice){//元素反应
+            ToBeAttacked->HP-=2;
+        }else{// 火火相碰
+            ToBeAttacked->HP-=1;
+        }
+    }else if(ToBeAttacked->element==water){// 砖块是水元素
+        if(ball->element==fire){
+            ToBeAttacked->HP-=2;
+        }else if(ball->element==thunder){
+            for(int i=location.y-1;i<=location.y+1;i++){
+                for(int j=location.x-1;j<=location.x+1;j++){
+                    if(map[i][j].status==1){
+                        map[i][j].HP-=1;
+                    }
+                }
+            }
+        }else{
+            ToBeAttacked->HP-=1;
+        }
+    }else if(ToBeAttacked->element==thunder){// 砖块是雷元素
+        if(ball->element==fire){
+            ToBeAttacked->HP-=2;
+        }else if(ball->element==water){
+            for(int i=location.y-1;i<=location.y+1;i++){
+                for(int j=location.x-1;j<=location.x+1;j++){
+                    if(map[i][j].status==1){
+                        map[i][j].HP-=1;
+                    }
+                }
+            }
+        }else if(ball->element==ice){
+            ToBeAttacked->HP-=4;
+        }else{
+            ToBeAttacked->HP-=1;
+        }
+    }else if(ToBeAttacked->element==ice){
+        if(ball->element==fire){
+            ToBeAttacked->HP-=2;
+        }else if(ball->element==thunder){
+            ToBeAttacked->HP-=4;
+        }else{
+            ToBeAttacked->HP-=1;
+        }
+    }else if(ToBeAttacked->element==normal){
+        ToBeAttacked->element=ball->element;
+        ToBeAttacked->HP-=1;
     }
+}
+
+void DestroyBrick(){
+    for(int i=1;i<=Row;i++){
+        for(int j=1;j<=Col;j++){
+            if(map[i][j].HP<=0){
+                map[i][j].status=0;
+            }
+        }
+    }
+}
+
+int IsHitBoard(Ball *ball,Board *board){
+    for(int i=0;i<=1;i++){
+        if(ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y&&ball->y+ball->radius<=board[i].y+board[i].h){
+            ball->dx=ball->dx+board->dx/2;
+            ball->dy=-ball->dy+board->dy;
+        }
+    }
+    return 0;
 }
