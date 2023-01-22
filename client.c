@@ -32,6 +32,7 @@ typedef struct Ball{
     int x;
     int y;
     int radius;
+    enum Element element;
     struct Ball *next;
 }Ball;
 typedef struct Board{
@@ -66,8 +67,8 @@ void Load();
 Uint32 Update(int interval,void *param);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
-void RenderDrawCircle(int x,int y,int radius);
-int isHitBrick(int x,int y);
+void HitBrick(int x,int y);
+void ChangeColor(Ball *ball);
 Uint32 AnalyseMSG(int interval,void *param);
 Uint32 MoveBoard(int interval,void *param);
 Uint32 MoveBall(int interval,void *param);
@@ -258,7 +259,6 @@ Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，
 }
 
 void Hitbrick(){
-    if(is)
     ChangeColor();
     ElementalAttack();
     DestroyBrick();
@@ -370,12 +370,12 @@ void Load(){
 // 可以使用Timer函数来代替SDL——delay(是必须，用SDL_Addtimer),update,move
 // 判断元素反应，用音效来区分
 
-int HitBrick(int x,int y,Ball *ball){
+void HitBrick(int x,int y,Ball *ball){
     Location location;
     int col=x/Block+1;
     int row=y/Block+1;
     if(col>=0&&col<=Col+1&&row>=0&&row<=Row+1){// 有碰撞的可能
-        if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)){//上边碰撞
+        if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)&&map[][]){//上边碰撞
             location.x=col;
             location.y=row-1;
             ball->dy=-ball->dy;
@@ -391,6 +391,26 @@ int HitBrick(int x,int y,Ball *ball){
             location.x=col+1;
             location.y=row;
             ball->dx=-ball->dx;
+        }else{
+            return ;
         }
+        ChangeColor(ball,location);
+    }else{
+        return ;
+    }
+}
+
+void ChangeColor(Ball *ball,Location location){
+    if(map[location.y][location.x].element==normal){
+        map[location.y][location.x].element=ball->element;
+    }
+}
+
+void ElementAttack(Ball *ball,Location location){
+    // 火和水，火和雷，火和冰双倍
+    // 水和雷 十字伤害
+    // 雷和冰，直接去世
+    if(ball->element==fire&&(ball->element==water||ball->element==thunder||ball->element==ice)){
+
     }
 }
