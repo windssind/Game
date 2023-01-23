@@ -1,9 +1,10 @@
 #include<stdio.h>
 #include<netdb.h>
 #include<math.h>
+#include<stdbool.h>
 #define MaxExcutable 100
 #define Block 40
-#define Col 8
+#define Col 15
 #define Row 8
 #define UP 1
 #define LEFT 2
@@ -49,7 +50,18 @@ typedef struct Location{
     int y;
 }Location;
 
+typedef struct Bullet{
+    int x;
+    int y;
+    int dy;
+    int BulletLength;
+    int BulletDistance;
+    int BulletNum;
+    int status;
+}Bullet;// Bullet[0]作为计数的Bullet
+
 Board board[2];
+Bullet BulletPack[2][100];
 Brick map[Row][Col];
 SDL_Window *Window=NULL;
 SDL_Renderer *Renderer=NULL;
@@ -60,8 +72,19 @@ const int Window_Depth=Block*18;
 int client_socket;
 int level;
 int Timer_ID[5];
+int Power_ID[3];
+int BallNum;
+int BrickLeft;
+int CountPower_NewBall=0;
+int CountPower_Wall=0;
+int CountPower_Bullet=0;
+int PlayNum;
+bool GetPower_NewBall;
+bool GetPower_Wall;
+bool GetPower_Bullet;
+int BallNum=0;
 void BuildConnection(int argc,char *argv[]);
-void PaintFont(const char *text,int x,int y,int w,int h);
+//void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
 void Load();
 Uint32 Update(int interval,void *param);
@@ -69,6 +92,7 @@ void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void HitBrick(int x,int y);
 void ChangeColor(Ball *ball);
+void ChooseMod();
 int IsHitBoard(Ball *ball,Board *board);
 Uint32 AnalyseMSG(int interval,void *param);
 Uint32 MoveBoard(int interval,void *param);
@@ -77,9 +101,14 @@ SDL_Surface *BrickSurface[5];
 SDL_Texture *BrickTexture[5];
 SDL_Surface *BallSurface[5];
 SDL_Texture *BallTexture[5];
+SDL_Surface *BoardSurface[5];
+SDL_Texture *BoardTexture[5];
 void closeTimer();
 int main(int argc,char *argv[]){
-    BuildConnection(argc,argv);
+    ChooseMod();
+    if(PlayNum==2){
+        BuildConnection(argc,argv);
+    }
     InitAll();
     beginTimer();
     while(!IsGameOver());
@@ -128,7 +157,7 @@ void InitAll(){
         return;
     }
     Renderer=SDL_CreateRenderer(Window,-1,SDL_RENDERER_ACCELERATED);
-    font=TTF_OpenFont(,25);
+    //font=TTF_OpenFont(,25);
     Load();
     InitMap(1);
 }
@@ -159,10 +188,10 @@ Uint32 Update(Uint32 interval,void *param){
     DrawMap();
     DrawBall();
     DrawBoard();
-    if(....){
+    if(GetPower_Wall){
         DrawWall();
     }
-    if(....){
+    if(GetPower_Bullet){
         DrawBullet();
     }
     SDL_RenderPresent(Renderer);
@@ -178,15 +207,16 @@ void Draw(SDL_Surface *surface,int x,int y,int w,int h){
 void DrawMap(){
     for(int i=0;i<Row;i++){
         for(int j=0;j<Col;j++){
-            Draw(BrickSurface[rand()%5],Block*Col,Block*Row,Block,Block);
+            if(map[i][j].status==1){
+                Draw(BrickSurface[map[i][j].element],Block*Col,Block*Row,Block,Block);
+            }
         }
     }
 }
 void DrawBall(){
-    // Load中记得使用SDL_SetRenderDrawColor来设置render的颜色
     Ball *tmp=HeadNode->next;
     while(tmp!=NULL){
-        Draw(,tmp->x,tmp->y,tmp->radius*2,tmp->radius*2);
+        Draw(BallSurface[tmp->element],tmp->x,tmp->y,tmp->radius*2,tmp->radius*2);
     }
 }
 
@@ -242,15 +272,21 @@ Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，
             tmp->dx=-tmp->dx;
         }else if(tmp->y-tmp->radius<=0){// 上边碰撞
             tmp->dy=-tmp->dy;
-        }else if(){// 下边碰撞
-            if(有墙壁){
-                
+        }else if(tmp->y+tmp->radius>=Block*18){// 下边碰撞
+            if(GetPower_Wall){// 用playnum来维护有多少个挡板
+                tmp->dy=-tmp->dy;
             }else{// 没有墙壁
-                DeleteBall(tmp);
-            }
-        }else if(HitBoard(tmp,board)){ // 和board相碰
-            
+                if(BallNum==1){
+                    BallNum--;
+                    CreatBall(HeadNode,board[rand()%PlayNum].x,board[rand()%PlayNum].y);
+                }else{
+                    BallNum--;
+                    DeleteBall(tmp);
+                }
+                CountPower_Wall++;
+            }          
         }else{//(和砖块碰撞，有点复杂)
+            HitBoard();
             HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
         }
         tmp->x+=dx;
@@ -267,16 +303,23 @@ void Hitbrick(){
     GetPower();
 }
  void GetPower(){
-    if(.....全局变量维护){
+    if(CountPower_NewBall==5){// 一次性的
         // 连击数到达一定的combo就可以触发释放额外的小球(所以小球应该是malloc出来的)
-        //利用SDL_Addtimer来定时，到了时间节点时候就closetimer，并且用一个全局变量
-        CreatBall();
+        //利用SDL_Addtimer来定时，到了时间节点时候就closetimer，并且用一个全局变
+        GetPower_NewBall=true;
+        int No=rand()%PlayNum;
+        CreatBall(HeadNode,board[No].x,board[No].y);
+        CountPower_NewBall=0;
     }
-    if(......){// 到达一定的combo数两个效果触发一个
-        CreatWall();
-    }
-    if(.....){//场上方块数量很少
-        CreatBullet();
+    if(CountPower_Wall==3){// 长时间的
+        GetPower_Wall=true;
+        SDL_AddTimer(5000,VanishPower_Wall,NULL);
+        CountPower_Wall=0;
+    };
+    if(BrickLeft<=5&&GetPower_Bullet==false){//场上方块数量很少
+        GetPower_Bullet=true;
+        Power_ID[2]=SDL_AddTimer(30,CreatAndMoveAndHitCheckBullet,NULL);
+        Power_ID[3]=SDL_AddTimer(5000,VanishPower_Bullet,NULL);
     }
  }
 Ball *CreatLinkedList(){
@@ -291,10 +334,12 @@ Ball *CreatBall(Ball *HeadNode,int x,int y){//用链表结构
     newBall->dx=0;
     newBall->dy=15;// 还没决定好
     newBall->radius=10;
+    newBall->element=normal;
     //次序不重要，直接用头插法就行了
     Ball *tmp=HeadNode->next;
     HeadNode->next=newBall;
     newBall->next=tmp;
+    BallNum++;
 }
 void DeleteBall(Ball *headNode,Ball *DesertedBall){
     if(ballNum==1){
@@ -333,7 +378,7 @@ void AnalyseMSG(){
 
 void InitMap_1(){
     for(int i=0;i<Row;i++){
-        for(int j=0;j<Col;j++){
+        for(int j=i;j<Col-i;j++){
             map[i][j].HP=MaxHp;
             map[i][j].element=rand()%5;
             map[i][j].status=1;
@@ -358,13 +403,17 @@ void closeTimer(){
 void Load(){
     char BrickImageName[30];
     char BallImageName[30];
+    char BoardImageName[30];
     for(int i=0;i<4;i++){
         sprintf(BrickImageName,"/Image/Brick%d",i+1);
         BrickSurface[i]=IMG_Load(BrickImageName);
         sprintf(BallImageName,"/Image/Ball%d",i+1);
         BallSurface[i]=IMG_Load(BallImageName);
+        sprintf(BoardImageName,"/Image/Board%d",i+1);
+        BoardSurface[i]=IMG_Load(BoardImageName);
         memset(BrickImageName,0,sizeof BrickImageName);
         memset(BallImageName,0,sizeof BallImageName);
+        memset(BoardImageName,0,sizeof BoardImageName);
     }
 }
 
@@ -397,13 +446,15 @@ void HitBrick(int x,int y,Ball *ball){
             return ;
         }
         ChangeColor(ball,location);
+        ElementalAttack(ball,location);
+        GetPower();
     }else{
         return ;
     }
 }
 
 
-void ElementAttack(Ball *ball,Location location){
+void ElementalAttack(Ball *ball,Location location){
     // 火和水，火和雷，火和冰双倍
     // 水和雷 九宫格伤害
     // 雷和冰，直接去世
@@ -468,12 +519,90 @@ void DestroyBrick(){
     }
 }
 
-int IsHitBoard(Ball *ball,Board *board){
+void HitBoard(Ball *ball,Board *board){
     for(int i=0;i<=1;i++){
         if(ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y&&ball->y+ball->radius<=board[i].y+board[i].h){
             ball->dx=ball->dx+board->dx/2;
-            ball->dy=-ball->dy+board->dy;
+            ball->dy=-ball->dy+board->dy/2;
+            ball->element=board[i].element;
+            if((CountPower_NewBall++)==5){
+                GetPower_NewBall=true;
+            }
+            return ;
         }
     }
-    return 0;
+}
+
+Uint32 VanishPower_Wall(int interval,void *param){
+    GetPower_Wall=false;
+    return interval;
+}
+
+Uint32 VanishPower_Bullet(int interval,void *param){
+    GetPower_Bullet=false;
+    return interval;
+}
+
+void ChooseMod(){
+    SDL_RenderClear(Renderer);
+    SDL_RenderCopy(Renderer,MainBackgroundTexture,NULL,&MainBackgroundRect);\
+    SDL_RenderPresent(Renderer);
+    SDL_Event event;
+    while(SDL_WaitEvent(&event)){
+        switch(event.type){
+            case SDL_KEYDOWN:
+                switch (event.key.keysym.sym){
+                    case SDLK_a:
+                        PlayNum=1;
+                        return ;
+                    case SDLK_d:
+                        PlayNum=2;
+                        return ;
+                    default:
+                        break;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void CreatAndMoveAndHitCheckBullet(){
+    // Creat
+    int NewNo[2];
+    for(int i=0;i<PlayNum;i++){
+        NewNO[i]=BulletPack[i].BulletNum+1;
+    }
+    
+    for(int i=0;i<PlayNum;i++){
+        BulletPack[i][NewNO[i]].status=1;
+        BulletPack[i][NewNO[i]].BulletDistance=20;
+        BulletPack[i][NewNO[i]].BulletLength=20;
+        BulletPack[i][NewNO[i]].x=board[i].x+5;
+        BulletPack[i][NewNO[i]].y=board[i].y;
+        BulletPack[i][0].BulletNum++;
+    }
+    // Move
+    for(int i=0;i<PlayNum;i++){
+        for(int j=0;j<BulletPack[i][NewNO[i]-1];j++){
+            if(BulletPack[i][j].status==1){
+                BulletPack[i][j].y+=BulletPack[i][j].dy;
+            }
+        }
+    }
+    // Hitcheck
+    for(int i=0;i<PlayNum;i++){
+        for(int j=0;j<BulletPack[i][NewNO[i]].BallNum;j++){
+            if(BulletPack[i][j].status==1){
+                int col=BulletPack[i][j].x/Block+1;
+                int row=BulletPack[i][j].y/Block+1;
+                if(BulletPack[i][j].y<=0){
+                    map[row][col].status=0;
+                }else if(map[row][col].status==1){
+                    map[row][col].HP-=1;
+                }
+            }
+        }
+    }
 }

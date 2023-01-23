@@ -79,12 +79,12 @@ void ExchangeMessage(){
         FD_SET(Player_socket[i],&set);
     }
     fd_set readset=set;
-    SDL_Event buf;
+    int buf;
     while(1){
         if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,NULL)>0){
             for(int i=0;i<PlayerNum;i++){
                 if(FD_ISSET(Player_socket[i],&set)){
-                    recvbytes=recv(Player_socket[i],&buf,sizeof(SDL_Event),0);
+                    recvbytes=recv(Player_socket[i],&buf,sizeof(int),0);
                     if(recvbytes==0){
                         fprintf(stderr,"Player%d disconnected\n ",i+1);
                         for(int i=0;i<PlayerNum;i++){
@@ -95,7 +95,7 @@ void ExchangeMessage(){
                     if(recvbytes==-1){
                         fprintf(stderr,"recv Player%d fail\n",~i+1);
                     }
-                    sendbytes=send(Player_socket[~i],&buf,sizeof(SDL_Event),0);
+                    sendbytes=send(Player_socket[~i],&buf,sizeof(int),0);
                     if(sendbytes==0){
                         fprintf(stderr,"Player%d\n disconnected",i+1);
                         for(int i=0;i<PlayerNum;i++){
@@ -107,7 +107,7 @@ void ExchangeMessage(){
                         fprintf(stderr,"send to Player%d fail\n",~i+1);
                     }
                     
-                    memset(&buf,0,sizeof(SDL_Event));
+                    memset(&buf,0,sizeof(int));
                 }
             }
         }
