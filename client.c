@@ -10,7 +10,7 @@
 #define Board_w 60
 #define Board_start_x Block*7
 #define Board_start_y Block*14
-#define Ball_radius
+#define Ball_radius 5
 #define Col 15
 #define Row 8
 #define UP 1
@@ -20,6 +20,7 @@
 #define BoardColorChange 5
 #define MaxHp 4
 #define FPS 50
+#undef main
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
 #include"SDL2/SDL_ttf.h"
@@ -94,7 +95,7 @@ int BallNum=0;
 void BuildConnection(int argc,char *argv[]);
 //void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
-void CreatBall();
+Ball *CreatBall(Ball *HeadNode,int x,int y);
 void DrawMap();
 void DrawBall();
 void DrawBoard();
@@ -107,15 +108,24 @@ void InitMap_4();
 void InitMap_5();
 void InitGameObject();
 void Load();
+void ElementalAttack(Ball *ball,Location location);
+void DeleteBullet();
+void Initgame();
+void InitBall();
+void InitBoard();
+void Pause();
+Uint32 VanishPower_Wall(Uint32 interval,void *param);
+Uint32 VanishPower_Bullet(Uint32 interval,void *param);
+Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
 Uint32 Update(Uint32 interval,void *param);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
-void HitBrick(int x,int y);
-void ChangeColor(Ball *ball);
+void HitBrick(int x,int y,Ball *ball);
+void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
 bool IsGameOver();
-void DeleteBall(Ball *ball);
-int HitBoard(Ball *ball,Board *board);
+void DeleteBall(Ball *HeadNode,Ball *DesertedBall);
+void HitBoard(Ball *ball,Board *board);
 Uint32 AnalyseMSG(Uint32 interval,void *param);
 Uint32 MoveBoard(Uint32 interval,void *param);
 Uint32 MoveBall(Uint32 interval,void *param);
@@ -125,6 +135,9 @@ SDL_Surface *BallSurface[5];
 SDL_Texture *BallTexture[5];
 SDL_Surface *BoardSurface[5];
 SDL_Texture *BoardTexture[5];
+SDL_Surface *MainBackgroundSurface;
+SDL_Texture *MainBackgroundTexture;
+SDL_Rect BackgroundRect;
 Ball *HeadNode;
 void beginTimer();
 void closeTimer();
@@ -277,6 +290,8 @@ Uint32 MoveBoard(Uint32 interval,void *param){
                     case SDLK_q:
                         board[0].element=(board[0].element+1)%5;
                         MSG=BoardColorChange;
+                    case SDLK_TAB:
+                        Pause();
                     default:
                         break;
                 }
@@ -310,7 +325,7 @@ Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界
                     CreatBall(HeadNode,board[rand()%PlayNum].x,board[rand()%PlayNum].y);
                 }else{
                     BallNum--;
-                    DeleteBall(tmp);
+                    DeleteBall(HeadNode,tmp);
                 }
                 CountPower_Wall++;
             }          
@@ -324,12 +339,6 @@ Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界
     }
     
     return interval;
-}
-
-void Hitbrick(){
-    ElementalAttack();
-    DestroyBrick();
-    GetPower();
 }
  void GetPower(){
     if(CountPower_NewBall==5){// 一次性的
@@ -347,7 +356,7 @@ void Hitbrick(){
     };
     if(BrickLeft<=5&&GetPower_Bullet==false){//场上方块数量很少
         GetPower_Bullet=true;
-        Power_ID[2]=SDL_AddTimer(60h,CreatAndMoveAndHitCheckBullet,NULL);
+        Power_ID[2]=SDL_AddTimer(60,CreatAndMoveAndHitCheckBullet,NULL);
         Power_ID[3]=SDL_AddTimer(5000,VanishPower_Bullet,NULL);
     }
  }
@@ -369,9 +378,10 @@ Ball *CreatBall(Ball *HeadNode,int x,int y){//用链表结构
     HeadNode->next=newBall;
     newBall->next=tmp;
     BallNum++;
+    return newBall;
 }
 void DeleteBall(Ball *headNode,Ball *DesertedBall){
-    if(ballNum==1){
+    if(BallNum==1){
         return ;
     }else{
         Ball *tmp=headNode;
@@ -384,22 +394,24 @@ void DeleteBall(Ball *headNode,Ball *DesertedBall){
     }
 }
 
-void AnalyseMSG(){
+Uint32 AnalyseMSG(Uint32 interval,void *param){
     int recvMSG;
     recv(client_socket,&recvMSG,sizeof(int),MSG_DONTWAIT);// 有个问题，send和recv是隶属于不同的流的吗
     switch (recvMSG){
     case UP:
-        The_other.y-=The_other.dy;
+        board[1].y-=board[1].dy;
         break;
     case DOWN:
-        The_other.y+=The_other.dy;
+        board[1].y+=board[1].dy;
         break;
     case LEFT:
-        The_other.x-=The_other.dx;
+        board[1].x-=board[1].dx;
         break;
     case RIGHT:
-        The_other.x+=The_other.dx;
+        board[1].x+=board[1].dx;
         break;
+    case BoardColorChange:
+        board[1].element=(board[1].element+1)%5;
     default:
         break;
     }
@@ -444,6 +456,12 @@ void Load(){
         memset(BallImageName,0,sizeof BallImageName);
         memset(BoardImageName,0,sizeof BoardImageName);
     }
+    MainBackgroundSurface=IMG_Load("/Image/MainBackground");
+    MainBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,MainBackgroundSurface);
+    BackgroundRect.h=Block*18;
+    BackgroundRect.w=Block*15;
+    BackgroundRect.x=0;
+    BackgroundRect.y=0;
 }
 
 
@@ -455,19 +473,19 @@ void HitBrick(int x,int y,Ball *ball){
     int col=x/Block+1;
     int row=y/Block+1;
     if(col>=0&&col<=Col+1&&row>=0&&row<=Row+1){// 有碰撞的可能
-        if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)&&map[][]){//上边碰撞
+        if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)&&map[row][col].status==1){//上边碰撞
             location.x=col;
             location.y=row-1;
             ball->dy=-ball->dy;
-        }else if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y+ball->radius>=Block*(row+1)){// 下边碰撞
+        }else if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y+ball->radius>=Block*(row+1)&&map[row][col].status==1){// 下边碰撞
             location.x=col;
             location.y=row+1;
             ball->dy=-ball->dy;
-        }else if(ball->y>=Block*(row-1)&&ball->y<=Block*row&&ball->x-ball->radius<=Block*(col-1)){
+        }else if(ball->y>=Block*(row-1)&&ball->y<=Block*row&&ball->x-ball->radius<=Block*(col-1)&&map[row][col].status==1){
             location.x=col-1;
             location.y=row;
             ball->dx=-ball->dx;
-        }else if(ball->y>=Block*(row-1)&&ball->y<=Block*row&&ball->x+ball->radius>=Block*(col+1)){
+        }else if(ball->y>=Block*(row-1)&&ball->y<=Block*row&&ball->x+ball->radius>=Block*(col+1)&&map[row][col].status==1){
             location.x=col+1;
             location.y=row;
             ball->dx=-ball->dx;
@@ -559,20 +577,23 @@ void HitBoard(Ball *ball,Board *board){
     }
 }
 
-Uint32 VanishPower_Wall(int interval,void *param){
+Uint32 VanishPower_Wall(Uint32 interval,void *param){
     GetPower_Wall=false;
+    SDL_RemoveTimer(Power_ID[1]);
     return interval;
 }
 
-Uint32 VanishPower_Bullet(int interval,void *param){
+Uint32 VanishPower_Bullet(Uint32 interval,void *param){
     GetPower_Bullet=false;
     DeleteBullet(); 
+    SDL_RemoveTimer(Power_ID[2]);
+    SDL_RemoveTimer(Power_ID[3]);
     return interval;
 }
 
 void ChooseMod(){
     SDL_RenderClear(Renderer);
-    SDL_RenderCopy(Renderer,MainBackgroundTexture,NULL,&MainBackgroundRect);
+    SDL_RenderCopy(Renderer,MainBackgroundTexture,NULL,&BackgroundRect);
     SDL_RenderPresent(Renderer);
     SDL_Event event;
     while(SDL_WaitEvent(&event)){
@@ -595,11 +616,11 @@ void ChooseMod(){
     }
 }
 
-void CreatAndMoveAndHitCheckBullet(){
+Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param){
     // Creat
-    int NewNo[2];
+    int NewNO[2];
     for(int i=0;i<PlayNum;i++){
-        NewNO[i]=BulletPack[i].BulletNum+1;
+        NewNO[i]=BulletPack[i][0].BulletNum+1;
     }
     
     for(int i=0;i<PlayNum;i++){
@@ -612,7 +633,7 @@ void CreatAndMoveAndHitCheckBullet(){
     }
     // Move
     for(int i=0;i<PlayNum;i++){
-        for(int j=0;j<BulletPack[i][NewNO[i]-1];j++){
+        for(int j=0;j<BulletPack[i][0].BulletNum-1;j++){
             if(BulletPack[i][j].status==1){
                 BulletPack[i][j].y+=BulletPack[i][j].dy;
             }
@@ -620,7 +641,7 @@ void CreatAndMoveAndHitCheckBullet(){
     }
     // Hitcheck
     for(int i=0;i<PlayNum;i++){
-        for(int j=0;j<BulletPack[i][NewNO[i]].BallNum;j++){
+        for(int j=0;j<BulletPack[i][NewNO[i]].BulletNum;j++){
             if(BulletPack[i][j].status==1){
                 int col=BulletPack[i][j].x/Block+1;
                 int row=BulletPack[i][j].y/Block+1;
@@ -634,20 +655,25 @@ void CreatAndMoveAndHitCheckBullet(){
     }
 }
 
-int IsGameOver(){
+bool IsGameOver(){
     if(BrickLeft<=0){
         if(level=5){
-            Win();
+            //Win();
+            return 1;
         }else{
             level++;
             Initgame();
+            return 0;
         }
+    }else{
+        return 0;
     }
 }
 
 void Initgame(){
     InitMap(level);
     DeleteBullet();
+    InitGameObject();
 }
 
 void DeleteBullet(){
@@ -659,9 +685,12 @@ void DeleteBullet(){
 }
 
 void Quit(){
-    SDL_DestroyTexture(BoardTexture);
-    SDL_DestroyTexture(BallTexture);
-    SDL_DestroyTexture(BrickTexture);
+    for(int i=0;i<5;i++){
+        SDL_DestroyTexture(BoardTexture[i]);
+        SDL_DestroyTexture(BallTexture[i]);
+        SDL_DestroyTexture(BrickTexture[i]);
+    }
+    SDL_DestroyTexture(MainBackgroundTexture);
     SDL_DestroyRenderer(Renderer);
     SDL_DestroyWindow(Window);
     SDL_Quit();
@@ -686,9 +715,35 @@ void InitBoard(){
 }
 
 void InitBall(){
-    HeadNode=(Ball*)malloc(sizeof Ball);
+    HeadNode=(Ball*)malloc(sizeof (Ball));
     for(int i=0;i<PlayNum;i++){
         CreatBall(HeadNode,Board_start_x+Board_w/2,Board_start_y-2*Ball_radius);
     }
 }
-    
+
+void Pause(){
+    SDL_RenderClear(Renderer);
+    SDL_RenderCopy(Renderer,PauseTexture,NULL,&BackgroundRect);
+    SDL_RenderPresent(Renderer);
+    SDL_Event event;
+    while(SDL_WaitEvent(&event)){
+        switch(event.type){
+            case SDL_KEYDOWN:
+                switch(event.key.keysym.sym){
+                    case SDLK_TAB:
+                    return ;
+                    case SDLK_ESCAPE:
+                        Quit();
+                        break;
+                    default:
+                        break;
+                }
+                break;
+            case SDL_Quit:
+                Quit();
+                break;
+            default:
+                break;
+        }
+    }
+}
