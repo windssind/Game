@@ -10,6 +10,7 @@
 #define Board_w 60
 #define Board_start_x Block*7
 #define Board_start_y Block*14
+#define Ball_radius
 #define Col 15
 #define Row 8
 #define UP 1
@@ -93,6 +94,7 @@ int BallNum=0;
 void BuildConnection(int argc,char *argv[]);
 //void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
+void CreatBall();
 void DrawMap();
 void DrawBall();
 void DrawBoard();
@@ -103,6 +105,7 @@ void InitMap_2();
 void InitMap_3();
 void InitMap_4();
 void InitMap_5();
+void InitGameObject();
 void Load();
 Uint32 Update(Uint32 interval,void *param);
 void InitMap(int level);
@@ -111,10 +114,11 @@ void HitBrick(int x,int y);
 void ChangeColor(Ball *ball);
 void ChooseMod();
 bool IsGameOver();
-int IsHitBoard(Ball *ball,Board *board);
-Uint32 AnalyseMSG(int interval,void *param);
-Uint32 MoveBoard(int interval,void *param);
-Uint32 MoveBall(int interval,void *param);
+void DeleteBall(Ball *ball);
+int HitBoard(Ball *ball,Board *board);
+Uint32 AnalyseMSG(Uint32 interval,void *param);
+Uint32 MoveBoard(Uint32 interval,void *param);
+Uint32 MoveBall(Uint32 interval,void *param);
 SDL_Surface *BrickSurface[5];
 SDL_Texture *BrickTexture[5];
 SDL_Surface *BallSurface[5];
@@ -243,53 +247,54 @@ void DrawBall(){
 
 void DrawBoard(){
     for(int i=0;i<2;i++){
-        Draw( ,board[i].x,board[i].y,board[i].w,board[i].h);
+        Draw(BoardSurface[4],board[i].x,board[i].y,board[i].w,board[i].h);
     }
 }
 
-void MoveBoard(){
+Uint32 MoveBoard(Uint32 interval,void *param){
     SDL_Event event;
     int MSG;
     while(SDL_PollEvent(&event)){
         const Uint8 *state= SDL_GetKeyboardState(NULL);
         if(event.type == SDL_KEYDOWN || event.type == SDL_KEYUP){
             if ((state[SDL_SCANCODE_UP]||state[SDL_SCANCODE_W])&& (!(state[SDL_SCANCODE_DOWN]||state[SDL_SCANCODE_S]))){
-                board.y-=dy;
+                board[0].y-=board[0].dy;
                 MSG=UP;
             }else if((!(state[SDL_SCANCODE_UP]||state[SDL_SCANCODE_W]))&&(state[SDL_SCANCODE_DOWN]||state[SDL_SCANCODE_S])){
-                board.y+=dy;
+                board[0].y+=board[0].dy;
                 MSG=DOWN;
             }else if((state[SDL_SCANCODE_LEFT]||state[SDL_SCANCODE_A])&&(!(state[SDL_SCANCODE_RIGHT]||state[SDL_SCANCODE_D]))){
-                board.x-=dx;
+                board[0].x-=board[0].dx;
                 MSG=LEFT;
             }else if((!(state[SDL_SCANCODE_LEFT]||state[SDL_SCANCODE_A]))&&(state[SDL_SCANCODE_RIGHT]||state[SDL_SCANCODE_D])){
-                board.x+=dx;
+                board[0].x+=board[0].dx;
                 MSG=RIGHT;
             }else{
                 switch (event.key.keysym.sym){
                     case SDLK_ESCAPE:
                         Quit();
                         break;
-                    case SDL_Quit:
-                        Quit();
                     case SDLK_q:
                         board[0].element=(board[0].element+1)%5;
                         MSG=BoardColorChange;
                     default:
                         break;
                 }
-                return ;
+                return interval;
             }
             if(send(client_socket,&MSG,sizeof(int),0)==-1){
                 fprintf(stderr,"send MSG fail");
-                return ;
+                return interval;
             }
+        }else if(event.type==SDL_QUIT){
+            Quit();
         }
     }
+    return interval;
 }
 
 
-Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，撞板，撞砖块
+Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界，撞板，撞砖块
     Ball *tmp=HeadNode->next;
     while(tmp!=NULL){
         if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Block*15){// 左边碰撞或者右边碰撞
@@ -310,11 +315,11 @@ Uint32 MoveBall(int interval,void *param){//有三种碰撞检测，撞边界，
                 CountPower_Wall++;
             }          
         }else{//(和砖块碰撞，有点复杂)
-            HitBoard();
-            HitBrick(.../*要传进去跟被撞击的砖块有关的信息*/);
+            HitBoard(tmp,board);
+            HitBrick(tmp->x,tmp->y,tmp);
         }
-        tmp->x+=dx;
-        tmp->y+=dy;
+        tmp->x+=tmp->dx;
+        tmp->y+=tmp->dy;
         tmp=tmp->next;// 有bug，如果delete了，就会有问题
     }
     
@@ -682,5 +687,8 @@ void InitBoard(){
 
 void InitBall(){
     HeadNode=(Ball*)malloc(sizeof Ball);
-    CreatBall()
+    for(int i=0;i<PlayNum;i++){
+        CreatBall(HeadNode,Board_start_x+Board_w/2,Board_start_y-2*Ball_radius);
+    }
 }
+    
