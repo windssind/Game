@@ -4,12 +4,19 @@
 #include<stdbool.h>
 #define MaxExcutable 100
 #define Block 40
+#define Board_Vx 5
+#define Board_Vy 5
+#define Board_h 10
+#define Board_w 60
+#define Board_start_x Block*7
+#define Board_start_y Block*14
 #define Col 15
 #define Row 8
 #define UP 1
 #define LEFT 2
 #define DOWN 3
 #define RIGHT 4
+#define BoardColorChange 5
 #define MaxHp 4
 #define FPS 50
 #include"SDL2/SDL.h"
@@ -86,13 +93,24 @@ int BallNum=0;
 void BuildConnection(int argc,char *argv[]);
 //void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
+void DrawMap();
+void DrawBall();
+void DrawBoard();
+void DrawWall();
+void DrawBullet();
+void InitMap_1();
+void InitMap_2();
+void InitMap_3();
+void InitMap_4();
+void InitMap_5();
 void Load();
-Uint32 Update(int interval,void *param);
+Uint32 Update(Uint32 interval,void *param);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void HitBrick(int x,int y);
 void ChangeColor(Ball *ball);
 void ChooseMod();
+bool IsGameOver();
 int IsHitBoard(Ball *ball,Board *board);
 Uint32 AnalyseMSG(int interval,void *param);
 Uint32 MoveBoard(int interval,void *param);
@@ -103,7 +121,10 @@ SDL_Surface *BallSurface[5];
 SDL_Texture *BallTexture[5];
 SDL_Surface *BoardSurface[5];
 SDL_Texture *BoardTexture[5];
+Ball *HeadNode;
+void beginTimer();
 void closeTimer();
+void Quit();
 int main(int argc,char *argv[]){
     ChooseMod();
     if(PlayNum==2){
@@ -159,7 +180,7 @@ void InitAll(){
     Renderer=SDL_CreateRenderer(Window,-1,SDL_RENDERER_ACCELERATED);
     //font=TTF_OpenFont(,25);
     Load();
-    InitMap(1);
+    InitGameObject();
 }
 
 /*void PaintFont(const char *text,int x,int y,int w,int h){
@@ -199,7 +220,7 @@ Uint32 Update(Uint32 interval,void *param){
 }
 
 void Draw(SDL_Surface *surface,int x,int y,int w,int h){
-    SDL_Texture texture=SDL_CreateTextureFromSurface(Renderer,surface);
+    SDL_Texture *texture=SDL_CreateTextureFromSurface(Renderer,surface);
     SDL_Rect rect={x,y,w,h};
     SDL_RenderCopy(Renderer,texture,NULL,&rect);
     SDL_DestroyTexture(texture);
@@ -251,6 +272,9 @@ void MoveBoard(){
                         break;
                     case SDL_Quit:
                         Quit();
+                    case SDLK_q:
+                        board[0].element=(board[0].element+1)%5;
+                        MSG=BoardColorChange;
                     default:
                         break;
                 }
@@ -318,7 +342,7 @@ void Hitbrick(){
     };
     if(BrickLeft<=5&&GetPower_Bullet==false){//场上方块数量很少
         GetPower_Bullet=true;
-        Power_ID[2]=SDL_AddTimer(30,CreatAndMoveAndHitCheckBullet,NULL);
+        Power_ID[2]=SDL_AddTimer(60h,CreatAndMoveAndHitCheckBullet,NULL);
         Power_ID[3]=SDL_AddTimer(5000,VanishPower_Bullet,NULL);
     }
  }
@@ -525,9 +549,6 @@ void HitBoard(Ball *ball,Board *board){
             ball->dx=ball->dx+board->dx/2;
             ball->dy=-ball->dy+board->dy/2;
             ball->element=board[i].element;
-            if((CountPower_NewBall++)==5){
-                GetPower_NewBall=true;
-            }
             return ;
         }
     }
@@ -540,12 +561,13 @@ Uint32 VanishPower_Wall(int interval,void *param){
 
 Uint32 VanishPower_Bullet(int interval,void *param){
     GetPower_Bullet=false;
+    DeleteBullet(); 
     return interval;
 }
 
 void ChooseMod(){
     SDL_RenderClear(Renderer);
-    SDL_RenderCopy(Renderer,MainBackgroundTexture,NULL,&MainBackgroundRect);\
+    SDL_RenderCopy(Renderer,MainBackgroundTexture,NULL,&MainBackgroundRect);
     SDL_RenderPresent(Renderer);
     SDL_Event event;
     while(SDL_WaitEvent(&event)){
@@ -605,4 +627,60 @@ void CreatAndMoveAndHitCheckBullet(){
             }
         }
     }
+}
+
+int IsGameOver(){
+    if(BrickLeft<=0){
+        if(level=5){
+            Win();
+        }else{
+            level++;
+            Initgame();
+        }
+    }
+}
+
+void Initgame(){
+    InitMap(level);
+    DeleteBullet();
+}
+
+void DeleteBullet(){
+    for(int i=0;i<PlayNum;i++){
+        for(int j=0;j<BulletPack[i][0].BulletNum;j++){
+            BulletPack[i][j].status=0;
+        }
+    }
+}
+
+void Quit(){
+    SDL_DestroyTexture(BoardTexture);
+    SDL_DestroyTexture(BallTexture);
+    SDL_DestroyTexture(BrickTexture);
+    SDL_DestroyRenderer(Renderer);
+    SDL_DestroyWindow(Window);
+    SDL_Quit();
+}
+
+void InitGameObject(){
+    InitMap(level);
+    InitBall();
+    InitBoard();
+}
+
+void InitBoard(){
+    for(int i=0;i<PlayNum;i++){
+        board[i].dx=Board_Vx;
+        board[i].dy=Board_Vy;
+        board[i].element=rand()%5;
+        board[i].h=Board_h;
+        board[i].w=Board_w;
+        board[i].x=Board_start_x;
+        board[i].y=Board_start_y;
+    }
+}
+
+void InitBall(){
+    HeadNode=(Ball*)malloc(sizeof Ball);
+    CreatBall()
 }
