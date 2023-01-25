@@ -144,11 +144,11 @@ void beginTimer();
 void closeTimer();
 void Quit();
 int main(int argc,char *argv[]){
-    ChooseMod();
+    printf("yes");
+    InitAll();
     if(PlayNum==2){
         BuildConnection(argc,argv);
     }
-    InitAll();
     beginTimer();
     while(!IsGameOver());
     closeTimer();
@@ -196,9 +196,11 @@ void InitAll(){
         return;
     }
     Renderer=SDL_CreateRenderer(Window,-1,SDL_RENDERER_ACCELERATED);
+    printf("yes");
     //font=TTF_OpenFont(,25);
+    ChooseMod();
     Load();
-    InitGameObject();
+    Initgame();
 }
 
 /*void PaintFont(const char *text,int x,int y,int w,int h){
@@ -722,9 +724,9 @@ void InitBall(){
     }
 }
 
-/*void Pause(){
+void Pause(){
     SDL_RenderClear(Renderer);
-    SDL_RenderCopy(Renderer,PauseTexture,NULL,&BackgroundRect);
+    SDL_RenderCopy(Renderer,BallTexture[0],NULL,&BackgroundRect);
     SDL_RenderPresent(Renderer);
     SDL_Event event;
     while(SDL_WaitEvent(&event)){
@@ -740,7 +742,7 @@ void InitBall(){
                         break;
                 }
                 break;
-            case SDL_Quit:
+            case SDL_QUIT:
                 Quit();
                 break;
             default:
@@ -752,3 +754,19 @@ void InitBall(){
 /*void PrintFont(const char*text){
     SDL_Surface Font=
 }*/
+
+void InitMap_2(){
+
+};
+
+void DrawWall(){
+
+}
+
+
+void ChangeColor(Ball *ball,Location location){
+
+}
+void DrawBullet(){
+
+}
