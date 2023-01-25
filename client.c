@@ -114,6 +114,7 @@ void Initgame();
 void InitBall();
 void InitBoard();
 void Pause();
+void PrintFont(const char*text);
 Uint32 VanishPower_Wall(Uint32 interval,void *param);
 Uint32 VanishPower_Bullet(Uint32 interval,void *param);
 Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
@@ -721,7 +722,7 @@ void InitBall(){
     }
 }
 
-void Pause(){
+/*void Pause(){
     SDL_RenderClear(Renderer);
     SDL_RenderCopy(Renderer,PauseTexture,NULL,&BackgroundRect);
     SDL_RenderPresent(Renderer);
@@ -747,3 +748,7 @@ void Pause(){
         }
     }
 }
+
+/*void PrintFont(const char*text){
+    SDL_Surface Font=
+}*/
