@@ -20,7 +20,7 @@ void WaitForConnection();
 void ExchangeMessage();
 int main(){
     WaitForConnection();
-    /*ExchangeMessage();*/
+    ExchangeMessage();
     close(socket_listen);
 }
 void WaitForConnection(){
@@ -95,7 +95,7 @@ void ExchangeMessage(){
                     if(recvbytes==-1){
                         fprintf(stderr,"recv Player%d fail\n",~i+1);
                     }
-                    sendbytes=send(Player_socket[~i],&buf,sizeof(int),0);
+                    sendbytes=send(Player_socket[i==0?1:0],&buf,sizeof(int),0);
                     if(sendbytes==0){
                         fprintf(stderr,"Player%d\n disconnected",i+1);
                         for(int i=0;i<PlayerNum;i++){

@@ -18,6 +18,8 @@
 #define DOWN 3
 #define RIGHT 4
 #define BoardColorChange 5
+#define DisConnected 6
+#define LaunchBall 7
 #define MaxHp 4
 #define FPS 22
 #undef main
@@ -93,7 +95,6 @@ int BrickLeft=55;
 int CountPower_NewBall=0;
 int CountPower_Wall=0;
 int CountPower_Bullet=0;
-int PlayNum;
 bool GetPower_Wall=false;
 bool GetPower_Bullet=false;
 void BuildConnection(int argc,char *argv[]);
@@ -111,6 +112,7 @@ void InitMap_3();
 void InitMap_4();
 void InitMap_5();
 void InitGameObject();
+void LimitBoard(Board *board);
 void Launch();
 void Load();
 int  dist(int x1,int y1,int x2,int y2);
@@ -148,7 +150,7 @@ SDL_Texture *MainBackgroundTexture;
 SDL_Rect BackgroundRect;
 Ball *HeadNode[2];
 const Uint8 *KeyValue;
-bool WaitForLaunch;
+ int PlayNum;
 void beginTimer();
 void closeTimer();
 void Quit();
@@ -170,6 +172,7 @@ void BuildConnection(int argc,char *argv[]){
         exit(1);
     }
     struct addrinfo *result,hints;
+    memset(&hints,0,sizeof hints);
     hints.ai_socktype=SOCK_STREAM;
     if(getaddrinfo(argv[1],argv[2],&hints,&result)!=0){
         fprintf(stderr,"getaddrinfo failed\n");
@@ -246,7 +249,6 @@ Uint32 Update(Uint32 interval,void *param){
         printf("wronginto bullet\n");
     }*/
     SDL_RenderPresent(Renderer);
-    printf("ballnum=%d\n",board[0].BallNum);
     return interval;
 }
 
@@ -269,22 +271,21 @@ void DrawBall(){
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
-            Draw(BallSurface[tmp->element],tmp->x,tmp->y,tmp->radius*2,tmp->radius*2);
-            tmp=tmp->next;
+           Draw(BallSurface[tmp->element],tmp->x,tmp->y,tmp->radius*2,tmp->radius*2);
+           tmp=tmp->next;
         }
     }
 }
 
 void DrawBoard(){
     for(int i=0;i<PlayNum;i++){
-        Draw(BrickSurface[4],board[i].x,board[i].y,board[i].w,board[i].h);
+        Draw(BrickSurface[board[i].element],board[i].x,board[i].y,board[i].w,board[i].h);
     }
 }
 
 Uint32 MoveBoard(Uint32 interval,void *param){
-    SDL_Event event;
-    SDL_PollEvent(&event);
-        int MSG;
+        SDL_Event event;
+        int MSG=0;
         if (KeyValue[SDL_SCANCODE_W]||KeyValue[SDL_SCANCODE_UP]){
             board[0].dy=-Board_Vy;
             board[0].y+=board[0].dy;
@@ -309,35 +310,34 @@ Uint32 MoveBoard(Uint32 interval,void *param){
         }
         if(KeyValue[SDL_SCANCODE_ESCAPE]){
             Quit();
+            MSG=DisConnected;
         }
-        if(KeyValue[SDL_SCANCODE_]){
-            printf("right\n");
+        if(KeyValue[SDL_SCANCODE_H]){
             Launch(&board[0]);
+            MSG=LaunchBall;
         }
-        if(board[0].x<=0){
-            board[0].x=0;
-            board[0].dx=0;
-        }
-        if(board[0].x+board[0].w>=Block*15){
-            board[0].x=Block*15-board[0].w;
-            board[0].dx=0;
-        }
-        if(board[0].y<=Block*14){
-            board[0].y=Block*14;
-            board[0].dy=0;
-        }
-        if(board[0].y+board[0].h>=Block*18){
-            board[0].y=Block*18-board[0].h;
-            board[0].dy=0;
-        }  
-        if(PlayNum==2){
-            if(send(client_socket,&MSG,sizeof(int),0)==-1){
-                fprintf(stderr,"send MSG fail");
-                return interval;
+        LimitBoard(&board[0]);
+        while(SDL_PollEvent(&event)){
+            if(event.type==SDL_QUIT){
+                Quit();
+                MSG=DisConnected;
+            }else if(event.type==SDL_KEYDOWN){
+                if(event.key.keysym.sym==SDLK_c){
+                    board[0].element=(board[0].element+1)%5;
+                    MSG=BoardColorChange;
                 }
+            } 
+        }
+        if(PlayNum==2&&MSG!=0){
+            if(send(client_socket,&MSG,sizeof(int),0)==-1){
+                perror("send");
+                return interval;
+            }
+            printf("snedMSG=%d\n",MSG);
         }
         return interval;
-}
+    }
+
 //一直重复a的原因：getkeyboardstate函数是以事件为基础的，不删除事件，这个按下了a就会一直在消息队列里
 
 
@@ -349,7 +349,7 @@ Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界
                 tmp->dx=-tmp->dx;
             }else if(tmp->y-tmp->radius<=0){// 上边碰撞
                 tmp->dy=-tmp->dy;
-            }else if(tmp->y+tmp->radius>=Block*18){// 下边碰撞
+            }else if(tmp->y+tmp->radius>=Block*17.4){// 下边碰撞
                 if(GetPower_Wall){// 用playnum来维护有多少个挡板
                     tmp->dy=-tmp->dy;
                 }else{// 没有墙壁
@@ -369,20 +369,28 @@ Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界
                 HitBoard(tmp,board);
                 HitBrick(tmp->x,tmp->y,tmp);
             }
+            //
             tmp->x+=tmp->dx;
             tmp->y+=tmp->dy;
+            //
+            if(tmp->dx==0&&tmp->dy==0){
+                tmp->x=board[i].x+board[i].w/2;
+                tmp->y=board[i].y-tmp->radius*2;
+            }
+            // 
             tmp=tmp->next;// 有bug，如果delete了，就会有问题
+            // 
         }
-        return interval;
     }
     GetPower();
+    return interval;
 }
 void GetPower(){
     for(int i=0;i<PlayNum;i++){
         if(board[i].CountPower_Wall>=10){// 长时间的
         GetPower_Wall=true;
-        SDL_AddTimer(5000,VanishPower_Wall,NULL);
-        CountPower_Wall=0;
+        Power_ID[1]=SDL_AddTimer(5000,VanishPower_Wall,NULL);
+        board[i].CountPower_Wall=0;
         break;
         }
     }
@@ -425,24 +433,37 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
 
 Uint32 AnalyseMSG(Uint32 interval,void *param){
     int recvMSG;
-    recv(client_socket,&recvMSG,sizeof(int),MSG_DONTWAIT);// 有个问题，send和recv是隶属于不同的流的吗
-    switch (recvMSG){
-    case UP:
-        board[1].y-=board[1].dy;
-        break;
-    case DOWN:
-        board[1].y+=board[1].dy;
-        break;
-    case LEFT:
-        board[1].x-=board[1].dx;
-        break;
-    case RIGHT:
-        board[1].x+=board[1].dx;
-        break;
-    case BoardColorChange:
-        board[1].element=(board[1].element+1)%5;
-    default:
-        break;
+    if(recv(client_socket,&recvMSG,sizeof(int),MSG_DONTWAIT)>=0){
+        printf("recvmsg=%d\n",recvMSG);
+        if(recvMSG==UP){
+            board[1].dy=-Board_Vy;
+            board[1].y+=board[1].dy;
+        }else if(recvMSG==DOWN){
+            board[1].dy=Board_Vy;
+            board[1].y+=board[1].dy;
+        }else{
+            board[1].dx=0;
+        }
+        if(recvMSG==LEFT){
+            board[1].dx=-Board_Vx;
+            board[1].x+=board[1].dx;
+        }else if(recvMSG==RIGHT){
+            board[1].dx=Board_Vx;
+            board[1].x+=board[1].dx;
+        }else{
+            board[1].dy=0;
+        }
+        if(recvMSG==BoardColorChange){
+            board[1].element=(board[1].element+1)%5;
+        }else if(recvMSG==DisConnected){
+            printf("The Other Player Disconnected\n");
+            SDL_RemoveTimer(Timer_ID[3]);
+        }else if(recvMSG==LaunchBall){
+            Launch(&board[1]);
+        }
+            LimitBoard(&board[1]);// 有个问题，send和recv是隶属于不同的流的吗
+    }else{
+        perror("recv");
     }
 }
 
@@ -464,7 +485,7 @@ void beginTimer(){
     Timer_ID[0]=SDL_AddTimer(FPS,Update,NULL);
     Timer_ID[1]=SDL_AddTimer(FPS,MoveBall,NULL);
     Timer_ID[2]=SDL_AddTimer(FPS,MoveBoard,NULL);
-    /*Timer_ID[3]=SDL_AddTimer(FPS,AnalyseMSG,NULL);*/
+    Timer_ID[3]=SDL_AddTimer(FPS,AnalyseMSG,NULL);
 }
 
 void closeTimer(){
@@ -542,7 +563,6 @@ void HitBrick(int x,int y,Ball *ball){
         else{
             return ;
         }
-        /*ChangeColor(ball,location);*/
         ElementalAttack(ball,location);
         DestroyBrick();
         /*GetPower();*/
@@ -621,13 +641,13 @@ void DestroyBrick(){
 
 void HitBoard(Ball *ball,Board *board){
     for(int i=0;i<PlayNum;i++){
-        if(ball->dy>0&&ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y){
+        if(ball->dy>0&&ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y-10&&ball->y+board[i].HeadNode->next->radius<=board[i].y+board[i].h*2){
             ball->dx=ball->dx+board[i].dx/3;
             ball->dy=-ball->dy+board[i].dy/6;
             ball->element=board[i].element;
             board[i].CountPower_NewBall++;
-            if(board[i].CountPower_NewBall==4){
-                CreatBall(board[i].HeadNode,board[i].x+board[i].w,board[i].y-ball->radius*2,board);
+            if(board[i].CountPower_NewBall==4&&board[i].BallNum<=3){
+                CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-ball->radius*2,board);
                 board[i].CountPower_NewBall=0;
             }
             return ;
@@ -828,11 +848,6 @@ void DrawWall(){
     Draw(BrickSurface[4],0,Block*17.8,Block*16,Block*0.2);
 }
 
-
-/*void ChangeColor(Ball *ball,Location location){
-    ball->element=map[location.y][location.x].element;
-    return ;
-}*/
 void DrawBullet(){
 
 }
@@ -846,13 +861,33 @@ void Launch(Board *board){
     Ball *tmp=board->HeadNode->next;
     while(tmp!=NULL){
         if(tmp->dx==0&&tmp->dy==0){
-            tmp->dx=board->dx;
-            tmp->dy=-15;
+            tmp->dx=0;
+            tmp->dy=-10;
         }
         tmp=tmp->next;
         return ;
     }
 }
 
+void LimitBoard(Board *board){
+    if(board->x<=0){
+            board->x=0;
+            board->dx=0;
+        }
+        if(board->x+board->w>=Block*15){
+            board->x=Block*15-board->w;
+            board->dx=0;
+        }
+        if(board->y<=Block*14){
+            board->y=Block*14;
+            board->dy=0;
+        }
+        if(board->y+board->h>=Block*18){
+            board->y=Block*18-board->h;
+            board->dy=0;
+        }
+}
+
 // 键盘卡顿主要是由于处理事件速度不快，导致停止按键后挤压了事件
 // 后期再优化帧率把
+// 碰撞的时候巧妙利用视觉残留，不用过于精准
