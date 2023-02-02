@@ -3,12 +3,12 @@
 #include<math.h>
 #include<stdbool.h>
 #define MaxExcutable 100
-#define Block 40
+#define Block 50
 #define Board_Vx 10
 #define Board_Vy 10
 #define Board_h 15
 #define Board_w 170
-#define Board_start_x Block*7
+#define Board_start_x Block*4
 #define Board_start_y Block*14
 #define Ball_radius 13
 #define Col 15
@@ -21,7 +21,7 @@
 #define DisConnected 6
 #define LaunchBall 7
 #define MaxHp 4
-#define FPS 22
+#define FPS 30
 #undef main
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
@@ -62,6 +62,7 @@ typedef struct Board{
     int y;
     int w;
     int h;
+    int NO;//
 }Board;
 typedef struct Location{
     int x;
@@ -78,6 +79,16 @@ typedef struct Bullet{
     int status;
 }Bullet;// Bullet[0]作为计数的Bullet
 
+typedef struct Message{
+    int board_x;
+    int board_y;
+    int board_dx;
+    int board_dy;
+    enum Element element; 
+    bool isLaunch;
+    bool isChangeColor;
+}Message;
+
 Board board[2];
 Bullet BulletPack[2][100];
 Brick map[Row+2][Col+2];
@@ -89,7 +100,6 @@ const int Window_Width=Block*15;
 const int Window_Depth=Block*18;
 int client_socket;
 int level=1;
-int Timer_ID[5];
 int Power_ID[3];
 int BrickLeft=55;
 int CountPower_NewBall=0;
@@ -113,7 +123,7 @@ void InitMap_4();
 void InitMap_5();
 void InitGameObject();
 void LimitBoard(Board *board);
-void Launch();
+void Launch(Board *board);
 void Load();
 int  dist(int x1,int y1,int x2,int y2);
 void ElementalAttack(Ball *ball,Location location);
@@ -124,11 +134,12 @@ void InitBall();
 void InitBoard();
 void GetPower();
 void Pause();
+void AdjustBoardLocation(int operation,Board *board,int times);
 void PrintFont(const char*text);
 Uint32 VanishPower_Wall(Uint32 interval,void *param);
 Uint32 VanishPower_Bullet(Uint32 interval,void *param);
 Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
-Uint32 Update(Uint32 interval,void *param);
+int Update(void *data);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void HitBrick(int x,int y,Ball *ball);
@@ -137,9 +148,10 @@ void ChooseMod();
 bool IsGameOver();
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board);
 void HitBoard(Ball *ball,Board *board);
-Uint32 AnalyseMSG(Uint32 interval,void *param);
-Uint32 MoveBoard(Uint32 interval,void *param);
-Uint32 MoveBall(Uint32 interval,void *param);
+/*Uint32 AnalyseMSG(Uint32 interval,void *param);*/
+int AnalyseMSG(void *data);
+int MoveBoard(void *data);
+int MoveBall(void *data);
 SDL_Surface *BrickSurface[5];
 SDL_Surface *BallSurface[5];
 SDL_Texture *BallTexture[5];
@@ -148,7 +160,6 @@ SDL_Texture *BoardTexture[5];
 SDL_Surface *MainBackgroundSurface;
 SDL_Texture *MainBackgroundTexture;
 SDL_Rect BackgroundRect;
-Ball *HeadNode[2];
 const Uint8 *KeyValue;
  int PlayNum;
 void beginTimer();
@@ -190,17 +201,25 @@ void BuildConnection(int argc,char *argv[]){
     //建立好连接之后，就可以释放了
     freeaddrinfo(result);
     // 已经建立好连接了，现在开始接受信息
-    char buf[MaxExcutable];
-    int recvbytes=recv(client_socket,&buf,MaxExcutable,0);//第三个参数是最大能接受的字节长度
+    int NO;
+    int recvbytes=recv(client_socket,&NO,MaxExcutable,0);//第三个参数是最大能接受的字节长度
     printf("revebytes=%d",recvbytes);
-    /*PaintFont(&buf,Length*6,Width*10,Length*2,Width*2);
-    SDL_RenderPresent(Renderer);
-    SDL_Delay(1000);*/
-    printf("%s",buf);
+    if(NO==1){
+        board[0].NO=1;
+        board[1].NO=2;
+    }else if(NO==2){
+        board[0].NO=2;
+        board[1].NO=1;
+    }else{
+        printf("decide who is first fail\n");
+    }
+    for(int i=0;i<PlayNum;i++){
+        board[i].x=(board[i].NO-1)*Block*4+Board_start_x;
+    }
     return;
 }
 void InitAll(){
-    SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER);//初始化
+    SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_EVERYTHING);//初始化
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
     Window=SDL_CreateWindow("Sheep",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,Window_Width,Window_Depth,SDL_WINDOW_SHOWN);
@@ -236,20 +255,24 @@ void InitMap(int level){
     return ;
 }
 
-Uint32 Update(Uint32 interval,void *param){
-    SDL_RenderClear(Renderer);
-    DrawMap();
-    DrawBall();
-    DrawBoard();                        
-    if(GetPower_Wall){
-        DrawWall();
-    }
+int Update(void *data){
+    while(1){
+        long int first=clock();
+        SDL_RenderClear(Renderer);
+        DrawMap();
+        DrawBall();
+        DrawBoard();                        
+        if(GetPower_Wall){
+            DrawWall();
+        }   
     /*if(GetPower_Bullet){
         DrawBullet();
         printf("wronginto bullet\n");
     }*/
-    SDL_RenderPresent(Renderer);
-    return interval;
+        SDL_RenderPresent(Renderer);
+        SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+    }
+    
 }
 
 void Draw(SDL_Surface *surface,int x,int y,int w,int h){
@@ -283,65 +306,75 @@ void DrawBoard(){
     }
 }
 
-Uint32 MoveBoard(Uint32 interval,void *param){
+int MoveBoard(void *data){
         SDL_Event event;
-        int MSG=0;
+        bool IsLaunch;
+        while(1){
+            int first=clock();
+            int times;
+            if(KeyValue[SDL_SCANCODE_LSHIFT]){
+                times=2;
+            }else{
+                times=1;
+            }
         if (KeyValue[SDL_SCANCODE_W]||KeyValue[SDL_SCANCODE_UP]){
-            board[0].dy=-Board_Vy;
-            board[0].y+=board[0].dy;
-            MSG=UP;
+            AdjustBoardLocation(UP,&board[0],times);
         }else if(KeyValue[SDL_SCANCODE_S]||KeyValue[SDL_SCANCODE_DOWN]){
-            board[0].dy=Board_Vy;
-            board[0].y+=board[0].dy;
-            MSG=DOWN;
+            AdjustBoardLocation(DOWN,&board[0],times);
         }else{
             board[0].dy=0;
         }
         if(KeyValue[SDL_SCANCODE_A]||KeyValue[SDL_SCANCODE_LEFT]){
-            board[0].dx=-Board_Vx;
-            board[0].x+=board[0].dx;
-            MSG=LEFT;
+            AdjustBoardLocation(LEFT,&board[0],times);
         }else if(KeyValue[SDL_SCANCODE_D]||KeyValue[SDL_SCANCODE_RIGHT]){
-            board[0].dx=Board_Vx;
-            board[0].x+=board[0].dx;
-            MSG=RIGHT;
+            AdjustBoardLocation(RIGHT,&board[0],times);
         }else{
             board[0].dx=0;
         }
         if(KeyValue[SDL_SCANCODE_ESCAPE]){
             Quit();
-            MSG=DisConnected;
         }
         if(KeyValue[SDL_SCANCODE_H]){
             Launch(&board[0]);
-            MSG=LaunchBall;
+            IsLaunch=true;
         }
-        LimitBoard(&board[0]);
+        //LimitBoard(&board[0]);
         while(SDL_PollEvent(&event)){
             if(event.type==SDL_QUIT){
                 Quit();
-                MSG=DisConnected;
             }else if(event.type==SDL_KEYDOWN){
                 if(event.key.keysym.sym==SDLK_c){
                     board[0].element=(board[0].element+1)%5;
-                    MSG=BoardColorChange;
                 }
             } 
         }
-        if(PlayNum==2&&MSG!=0){
-            if(send(client_socket,&MSG,sizeof(int),0)==-1){
-                perror("send");
-                return interval;
+        if(PlayNum==2){
+            Message MSG;
+            MSG.board_x=board[0].x;
+            MSG.board_y=board[0].y;
+            MSG.board_dx=board[0].dx;
+            MSG.board_dy=board[0].dy;
+            MSG.element=board[0].element;
+            if(IsLaunch){
+                MSG.isLaunch=true;
+            }else{
+                MSG.isLaunch=false;
             }
-            printf("snedMSG=%d\n",MSG);
+            if(send(client_socket,&MSG,sizeof(Message),0)==-1){
+                perror("send");
+            }
         }
-        return interval;
+     SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+        }
+        
     }
 
 //一直重复a的原因：getkeyboardstate函数是以事件为基础的，不删除事件，这个按下了a就会一直在消息队列里
 
 
-Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界，撞板，撞砖块
+int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖块
+while(1){
+    int first=clock();
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
@@ -383,7 +416,8 @@ Uint32 MoveBall(Uint32 interval,void *param){//有三种碰撞检测，撞边界
         }
     }
     GetPower();
-    return interval;
+    SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+    }
 }
 void GetPower(){
     for(int i=0;i<PlayNum;i++){
@@ -431,8 +465,9 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
     }
 }
 
-Uint32 AnalyseMSG(Uint32 interval,void *param){
+/*Uint32 AnalyseMSG(Uint32 interval,void *param){
     int recvMSG;
+    printf("enter\n");
     if(recv(client_socket,&recvMSG,sizeof(int),MSG_DONTWAIT)>=0){
         printf("recvmsg=%d\n",recvMSG);
         if(recvMSG==UP){
@@ -465,7 +500,7 @@ Uint32 AnalyseMSG(Uint32 interval,void *param){
     }else{
         perror("recv");
     }
-}
+}*/
 
 void InitMap_1(){
     for(int i=0;i<=Row+1;i++){
@@ -482,10 +517,12 @@ void InitMap_1(){
 }
 
 void beginTimer(){
-    Timer_ID[0]=SDL_AddTimer(FPS,Update,NULL);
-    Timer_ID[1]=SDL_AddTimer(FPS,MoveBall,NULL);
-    Timer_ID[2]=SDL_AddTimer(FPS,MoveBoard,NULL);
-    Timer_ID[3]=SDL_AddTimer(FPS,AnalyseMSG,NULL);
+    SDL_CreateThread(Update,"Update",(void*)NULL);
+    SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);
+    SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
+    if(PlayNum==2){
+        SDL_CreateThread(AnalyseMSG,"AnalyseMSG",(void*)NULL);
+    }
 }
 
 void closeTimer(){
@@ -789,17 +826,16 @@ void InitBoard(){
     for(int i=0;i<PlayNum;i++){
         board[i].dx=0;
         board[i].dy=0;
-        board[i].element=rand()%5;
+        board[i].element=4;
         board[i].h=Board_h;
         board[i].w=Board_w;
-        board[i].x=Board_start_x;
-        board[i].y=Board_start_y;
         board[i].HeadNode=(Ball *)malloc(sizeof (Ball));
         board[i].HeadNode->next=NULL;
         board[i].BallNum=0;
         board[i].CountPower_NewBall=0;
         board[i].CountPower_Bullet=0;
         board[i].CountPower_Wall=0;
+        board[i].y=Board_start_y;
     }
 }
 
@@ -891,3 +927,85 @@ void LimitBoard(Board *board){
 // 键盘卡顿主要是由于处理事件速度不快，导致停止按键后挤压了事件
 // 后期再优化帧率把
 // 碰撞的时候巧妙利用视觉残留，不用过于精准
+
+int AnalyseMSG(void *data){
+    while(1){
+        Message MSG;
+        int first=clock();
+        if(recv(client_socket,&MSG,sizeof(Message),MSG_DONTWAIT)>=0){
+            board[1].x=MSG.board_x;
+            board[1].y=MSG.board_y;
+            board[1].dx=MSG.board_dx;
+            board[1].dy=MSG.board_dy;
+            board[1].element=MSG.element;
+            if(MSG.isLaunch){
+                Launch(&board[1]);
+            }
+        }else{
+            perror("recv");
+        }
+        SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+    }
+}
+
+// 小心这个错误，两个程序中的内存位置是不一样的
+/* if(PlayNum==2){
+            Message MSG;
+            MSG.board=&board[0];
+            if(IsLaunch){
+                MSG.isLaunch=true;
+            }else{
+                MSG.isLaunch=false;
+            }
+            if(send(client_socket,&MSG,sizeof(Message),0)==-1){
+                perror("send");
+            }
+        }*/
+
+void AdjustBoardLocation(int operation,Board *board,int times){
+    if(operation==RIGHT){
+        if(board->x+board->w+Board_Vx*times>=board[1].x&&board->x+Board_Vx*times<=board[1].x&&((board->y+board->h>board[1].y&&board->y<board[1].y)||board->y>board[1].y&&board->y<board[1].y+board[1].h)){
+            board->x=board[1].x-board->w;
+        //printf("enter1\n");
+        }else{
+            board->x+=Board_Vx*times;
+        }
+    }else if(operation==LEFT){
+        if(board->x-Board_Vx*times>=board[1].x&&board->x-Board_Vx*times<=board[1].x+board->w&&((board->y+board->h>board[1].y&&board->y<board[1].y)||board->y>board[1].y&&board->y<board[1].y+board[1].h)){
+            board->x=board[1].x+board[1].w;
+            printf("enter2\n");
+        }else{
+            board->x-=Board_Vx*times;
+        }
+    }else if(operation==DOWN){
+        if(board->y+Board_Vy*times<=board[1].y&&board->y+board->h+Board_Vy*times>=board[1].y&&((board->x+board->w>board[1].x&&board->x<board[1].x)||board->x>board[1].x&&board->x<board[1].x+board[1].w)){
+            board->y=board[1].y-board->h;
+        }else{
+            board->y+=Board_Vy*times;
+        }
+    }else if(operation==UP){
+        if(board->y-Board_Vy*times>=board[1].y&&board->y-Board_Vy*times<=board[1].y+board[1].h&&((board->x+board->w>board[1].x&&board->x<board[1].x)||board->x>board[1].x&&board->x<board[1].x+board[1].w)){
+            board->y=board[1].y+board->h;
+        }else{
+            board->y-=Board_Vy*times;
+        }
+    }
+    if(board->x<=0){
+            board->x=0;
+            board->dx=0;
+        }
+        if(board->x+board->w>=Block*15){
+            board->x=Block*15-board->w;
+            board->dx=0;
+        }
+        if(board->y<=Block*14){
+            board->y=Block*14;
+            board->dy=0;
+        }
+        if(board->y+board->h>=Block*18){
+            board->y=Block*18-board->h;
+            board->dy=0;
+        }
+}
+
+// 
