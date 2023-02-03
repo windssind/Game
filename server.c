@@ -49,9 +49,11 @@ typedef struct Message{
     int board_y;
     int board_dx;
     int board_dy;
+    int CountPower_NewBall;
     enum Element element; 
     bool isLaunch;
     bool isChangeColor;
+    bool isCreatNewBall;
 }Message;
 int socket_listen;// 监听的套接字
 int Player_socket[PlayerNum];// 服务于 player 的套接字

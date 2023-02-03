@@ -63,6 +63,7 @@ typedef struct Board{
     int w;
     int h;
     int NO;//
+    bool HaveNewBallCreated;
 }Board;
 typedef struct Location{
     int x;
@@ -78,16 +79,27 @@ typedef struct Bullet{
     int BulletNum;
     int status;
 }Bullet;// Bullet[0]作为计数的Bullet
-
+typedef struct BallMessage{
+    int BallNum;
+    int x;
+    int y;
+    int dx;
+    int dy;
+}BallMessage;
 typedef struct Message{
     int board_x;
     int board_y;
     int board_dx;
     int board_dy;
+    int CountPower_NewBall;
     enum Element element; 
     bool isLaunch;
     bool isChangeColor;
+    bool isCreatNewBall;
+    BallMessage ballMessage[2][4];
 }Message;
+
+
 
 Board board[2];
 Bullet BulletPack[2][100];
@@ -125,6 +137,7 @@ void InitGameObject();
 void LimitBoard(Board *board);
 void Launch(Board *board);
 void Load();
+void SendMSG();
 int  dist(int x1,int y1,int x2,int y2);
 void ElementalAttack(Ball *ball,Location location);
 void DeleteBullet();
@@ -203,7 +216,6 @@ void BuildConnection(int argc,char *argv[]){
     // 已经建立好连接了，现在开始接受信息
     int NO;
     int recvbytes=recv(client_socket,&NO,MaxExcutable,0);//第三个参数是最大能接受的字节长度
-    printf("revebytes=%d",recvbytes);
     if(NO==1){
         board[0].NO=1;
         board[1].NO=2;
@@ -355,6 +367,23 @@ int MoveBoard(void *data){
             MSG.board_dx=board[0].dx;
             MSG.board_dy=board[0].dy;
             MSG.element=board[0].element;
+            for(int i=0;i<PlayNum;i++){
+                for(int j=1;j<=board[i].BallNum;j++){
+                    Ball *tmp=board[i].HeadNode->next;
+                    while(tmp!=NULL){
+                        MSG.ballMessage[i][j].BallNum=board[i].BallNum;
+                        MSG.ballMessage[i][j].dx=(board[i].HeadNode+j)->dx;
+                        MSG.ballMessage[i][j].dy=(board[i].HeadNode+j)->dy;
+                        MSG.ballMessage[i][j].x=(board[i].HeadNode+j)->x;
+                        MSG.ballMessage[i][j].y=(board[i].HeadNode+j)->y;
+                        tmp=tmp->next;
+                    }
+                }
+                
+            }            
+            if(board[0].HaveNewBallCreated){
+                MSG.isCreatNewBall=true;
+            }
             if(IsLaunch){
                 MSG.isLaunch=true;
             }else{
@@ -440,7 +469,7 @@ Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board){//用链表结构
     newBall->x=x;
     newBall->y=y;
     newBall->dx=0;
-    newBall->dy=-10;// 还没决定好
+    newBall->dy=0;// 还没决定好
     newBall->radius=Ball_radius;
     newBall->element=normal;
     //次序不重要，直接用头插法就行了
@@ -682,10 +711,15 @@ void HitBoard(Ball *ball,Board *board){
             ball->dx=ball->dx+board[i].dx/3;
             ball->dy=-ball->dy+board[i].dy/6;
             ball->element=board[i].element;
-            board[i].CountPower_NewBall++;
-            if(board[i].CountPower_NewBall==4&&board[i].BallNum<=3){
-                CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-ball->radius*2,board);
-                board[i].CountPower_NewBall=0;
+            if(i==0){
+                board[i].CountPower_NewBall++;
+            }
+            if(board[i].CountPower_NewBall>=4&&board[i].BallNum<=3){
+                if(i==0){// 创造球的工作让主玩家来做，通过同步机制来使得球同步  可以说，次要玩家的这个变量是废除掉了，但还是两边都需要creatball的，内存这是绕不开的
+                    CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-ball->radius*2,&board[i]);
+                    board[i].HaveNewBallCreated=true;
+                    board[i].CountPower_NewBall=0;
+                }
             }
             return ;
         }
@@ -841,7 +875,7 @@ void InitBoard(){
 
 void InitBall(){
     for(int i=0;i<PlayNum;i++){
-        Ball *NewBall=CreatBall(board[i].HeadNode,Board_start_x+30,Board_start_y-2*Ball_radius,&board[i]);
+        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x,board[i].y-Ball_radius*2,&board[i]);
     }
 }
 
@@ -899,30 +933,12 @@ void Launch(Board *board){
         if(tmp->dx==0&&tmp->dy==0){
             tmp->dx=0;
             tmp->dy=-10;
+            return ;
         }
         tmp=tmp->next;
-        return ;
     }
 }
 
-void LimitBoard(Board *board){
-    if(board->x<=0){
-            board->x=0;
-            board->dx=0;
-        }
-        if(board->x+board->w>=Block*15){
-            board->x=Block*15-board->w;
-            board->dx=0;
-        }
-        if(board->y<=Block*14){
-            board->y=Block*14;
-            board->dy=0;
-        }
-        if(board->y+board->h>=Block*18){
-            board->y=Block*18-board->h;
-            board->dy=0;
-        }
-}
 
 // 键盘卡顿主要是由于处理事件速度不快，导致停止按键后挤压了事件
 // 后期再优化帧率把
@@ -938,11 +954,11 @@ int AnalyseMSG(void *data){
             board[1].dx=MSG.board_dx;
             board[1].dy=MSG.board_dy;
             board[1].element=MSG.element;
+            if(MSG.isCreatNewBall){
+                CreatBall(board[1].HeadNode,board[1].x+board[1].w/2,board[1].y-Ball_radius*2,&board[1]);            }
             if(MSG.isLaunch){
                 Launch(&board[1]);
             }
-        }else{
-            perror("recv");
         }
         SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
     }
@@ -964,27 +980,25 @@ int AnalyseMSG(void *data){
 
 void AdjustBoardLocation(int operation,Board *board,int times){
     if(operation==RIGHT){
-        if(board->x+board->w+Board_Vx*times>=board[1].x&&board->x+Board_Vx*times<=board[1].x&&((board->y+board->h>board[1].y&&board->y<board[1].y)||board->y>board[1].y&&board->y<board[1].y+board[1].h)){
+        if(board->x+board->w<=board[1].x&&board->x+Board_Vx*times+board->w>=board[1].x&&((board->y+board->h>board[1].y&&board->y<=board[1].y)||board->y>=board[1].y&&board->y<board[1].y+board[1].h)){
             board->x=board[1].x-board->w;
-        //printf("enter1\n");
         }else{
             board->x+=Board_Vx*times;
         }
     }else if(operation==LEFT){
-        if(board->x-Board_Vx*times>=board[1].x&&board->x-Board_Vx*times<=board[1].x+board->w&&((board->y+board->h>board[1].y&&board->y<board[1].y)||board->y>board[1].y&&board->y<board[1].y+board[1].h)){
+        if(board->x>=board[1].x+board[1].w&&board->x-Board_Vx*times<=board[1].x+board->w&&((board->y+board->h>board[1].y&&board->y<=board[1].y)||board->y>=board[1].y&&board->y<board[1].y+board[1].h)){
             board->x=board[1].x+board[1].w;
-            printf("enter2\n");
         }else{
             board->x-=Board_Vx*times;
         }
     }else if(operation==DOWN){
-        if(board->y+Board_Vy*times<=board[1].y&&board->y+board->h+Board_Vy*times>=board[1].y&&((board->x+board->w>board[1].x&&board->x<board[1].x)||board->x>board[1].x&&board->x<board[1].x+board[1].w)){
+        if(board->y<=board[1].y&&board->y+board->h+Board_Vy*times>=board[1].y&&((board->x+board->w>board[1].x&&board->x<=board[1].x)||board->x>=board[1].x&&board->x<board[1].x+board[1].w)){
             board->y=board[1].y-board->h;
         }else{
             board->y+=Board_Vy*times;
         }
     }else if(operation==UP){
-        if(board->y-Board_Vy*times>=board[1].y&&board->y-Board_Vy*times<=board[1].y+board[1].h&&((board->x+board->w>board[1].x&&board->x<board[1].x)||board->x>board[1].x&&board->x<board[1].x+board[1].w)){
+        if(board->y>=board[1].y&&board->y-Board_Vy*times<=board[1].y+board[1].h&&((board->x+board->w>board[1].x&&board->x<=board[1].x)||board->x>=board[1].x&&board->x<board[1].x+board[1].w)){
             board->y=board[1].y+board->h;
         }else{
             board->y-=Board_Vy*times;
@@ -1008,4 +1022,38 @@ void AdjustBoardLocation(int operation,Board *board,int times){
         }
 }
 
-// 
+void SendMsg(){
+    Message MSG;
+    MSG.board_x=board[0].x;
+    MSG.board_y=board[0].y;
+    MSG.board_dx=board[0].dx;
+    MSG.board_dy=board[0].dy;
+    MSG.element=board[0].element;
+    for(int i=0;i<PlayNum;i++){
+        for(int j=1;j<=board[i].BallNum;j++){
+            Ball *tmp=board[i].HeadNode->next;
+            while(tmp!=NULL){
+                        MSG.ballMessage[i][j].BallNum=board[i].BallNum;
+                        MSG.ballMessage[i][j].dx=(board[i].HeadNode+j)->dx;
+                        MSG.ballMessage[i][j].dy=(board[i].HeadNode+j)->dy;
+                        MSG.ballMessage[i][j].x=(board[i].HeadNode+j)->x;
+                        MSG.ballMessage[i][j].y=(board[i].HeadNode+j)->y;
+                        tmp=tmp->next;
+                    }
+                }
+                
+            }            
+            if(board[0].HaveNewBallCreated){
+                MSG.isCreatNewBall=true;
+            }
+            if(IsLaunch){
+                MSG.isLaunch=true;
+            }else{
+                MSG.isLaunch=false;
+            }
+            if(send(client_socket,&MSG,sizeof(Message),0)==-1){
+                perror("send");
+            }        
+}
+
+// 自己思考问题时候，“次序感“还是太若了，就比如adjustloacation，这种判断应该先是预测会不会超过，如果会，补齐，而不是超过了在退回
