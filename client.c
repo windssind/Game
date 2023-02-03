@@ -361,37 +361,7 @@ int MoveBoard(void *data){
             } 
         }
         if(PlayNum==2){
-            Message MSG;
-            MSG.board_x=board[0].x;
-            MSG.board_y=board[0].y;
-            MSG.board_dx=board[0].dx;
-            MSG.board_dy=board[0].dy;
-            MSG.element=board[0].element;
-            for(int i=0;i<PlayNum;i++){
-                for(int j=1;j<=board[i].BallNum;j++){
-                    Ball *tmp=board[i].HeadNode->next;
-                    while(tmp!=NULL){
-                        MSG.ballMessage[i][j].BallNum=board[i].BallNum;
-                        MSG.ballMessage[i][j].dx=(board[i].HeadNode+j)->dx;
-                        MSG.ballMessage[i][j].dy=(board[i].HeadNode+j)->dy;
-                        MSG.ballMessage[i][j].x=(board[i].HeadNode+j)->x;
-                        MSG.ballMessage[i][j].y=(board[i].HeadNode+j)->y;
-                        tmp=tmp->next;
-                    }
-                }
-                
-            }            
-            if(board[0].HaveNewBallCreated){
-                MSG.isCreatNewBall=true;
-            }
-            if(IsLaunch){
-                MSG.isLaunch=true;
-            }else{
-                MSG.isLaunch=false;
-            }
-            if(send(client_socket,&MSG,sizeof(Message),0)==-1){
-                perror("send");
-            }
+            SendMSG();
         }
      SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
         }
@@ -493,43 +463,6 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
         board->BallNum--;
     }
 }
-
-/*Uint32 AnalyseMSG(Uint32 interval,void *param){
-    int recvMSG;
-    printf("enter\n");
-    if(recv(client_socket,&recvMSG,sizeof(int),MSG_DONTWAIT)>=0){
-        printf("recvmsg=%d\n",recvMSG);
-        if(recvMSG==UP){
-            board[1].dy=-Board_Vy;
-            board[1].y+=board[1].dy;
-        }else if(recvMSG==DOWN){
-            board[1].dy=Board_Vy;
-            board[1].y+=board[1].dy;
-        }else{
-            board[1].dx=0;
-        }
-        if(recvMSG==LEFT){
-            board[1].dx=-Board_Vx;
-            board[1].x+=board[1].dx;
-        }else if(recvMSG==RIGHT){
-            board[1].dx=Board_Vx;
-            board[1].x+=board[1].dx;
-        }else{
-            board[1].dy=0;
-        }
-        if(recvMSG==BoardColorChange){
-            board[1].element=(board[1].element+1)%5;
-        }else if(recvMSG==DisConnected){
-            printf("The Other Player Disconnected\n");
-            SDL_RemoveTimer(Timer_ID[3]);
-        }else if(recvMSG==LaunchBall){
-            Launch(&board[1]);
-        }
-            LimitBoard(&board[1]);// 有个问题，send和recv是隶属于不同的流的吗
-    }else{
-        perror("recv");
-    }
-}*/
 
 void InitMap_1(){
     for(int i=0;i<=Row+1;i++){
@@ -954,6 +887,17 @@ int AnalyseMSG(void *data){
             board[1].dx=MSG.board_dx;
             board[1].dy=MSG.board_dy;
             board[1].element=MSG.element;
+            for(int i=0;i<PlayNum;i++){
+                Ball *tmp=board[i].HeadNode->next;
+                board[i].BallNum=MSG.ballMessage[i][0].BallNum;
+                for(int j=0;j<MSG.ballMessage[i][j].BallNum;j++){
+                    tmp->dx=MSG.ballMessage[i][j].dx;
+                    tmp->dy=MSG.ballMessage[i][j].dy;
+                    tmp->x=MSG.ballMessage[i][j].x;
+                    tmp->y=MSG.ballMessage[i][j].y;
+                    tmp=tmp->next;
+                }
+            }
             if(MSG.isCreatNewBall){
                 CreatBall(board[1].HeadNode,board[1].x+board[1].w/2,board[1].y-Ball_radius*2,&board[1]);            }
             if(MSG.isLaunch){
@@ -1030,14 +974,14 @@ void SendMsg(){
     MSG.board_dy=board[0].dy;
     MSG.element=board[0].element;
     for(int i=0;i<PlayNum;i++){
-        for(int j=1;j<=board[i].BallNum;j++){
+        for(int j=0;j<board[i].BallNum;j++){
             Ball *tmp=board[i].HeadNode->next;
             while(tmp!=NULL){
                         MSG.ballMessage[i][j].BallNum=board[i].BallNum;
-                        MSG.ballMessage[i][j].dx=(board[i].HeadNode+j)->dx;
-                        MSG.ballMessage[i][j].dy=(board[i].HeadNode+j)->dy;
-                        MSG.ballMessage[i][j].x=(board[i].HeadNode+j)->x;
-                        MSG.ballMessage[i][j].y=(board[i].HeadNode+j)->y;
+                        MSG.ballMessage[i][j].dx=tmp->dx;
+                        MSG.ballMessage[i][j].dy=tmp->dy;
+                        MSG.ballMessage[i][j].x=tmp->x;
+                        MSG.ballMessage[i][j].y=tmp->y;
                         tmp=tmp->next;
                     }
                 }
