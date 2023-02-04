@@ -1,5 +1,4 @@
 #include<stdio.h>
-#include<netdb.h>
 #include<math.h>
 #include<stdbool.h>
 #define MaxExcutable 100
@@ -28,6 +27,11 @@
 #include"SDL2/SDL_ttf.h"
 #include<time.h>
 #include<math.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include<netdb.h>
 enum Element{
     fire,
     water,
@@ -93,7 +97,6 @@ typedef struct Message{
     int board_dy;
     int CountPower_NewBall;
     enum Element element; 
-    bool isLaunch;
     bool isChangeColor;
     bool isCreatNewBall;
     BallMessage ballMessage[2][4];
@@ -273,7 +276,7 @@ int Update(void *data){
         SDL_RenderClear(Renderer);
         DrawMap();
         DrawBall();
-        DrawBoard();                        
+        DrawBoard();                       
         if(GetPower_Wall){
             DrawWall();
         }   
@@ -320,7 +323,6 @@ void DrawBoard(){
 
 int MoveBoard(void *data){
         SDL_Event event;
-        bool IsLaunch;
         while(1){
             int first=clock();
             int times;
@@ -348,7 +350,6 @@ int MoveBoard(void *data){
         }
         if(KeyValue[SDL_SCANCODE_H]){
             Launch(&board[0]);
-            IsLaunch=true;
         }
         //LimitBoard(&board[0]);
         while(SDL_PollEvent(&event)){
@@ -480,8 +481,10 @@ void InitMap_1(){
 
 void beginTimer(){
     SDL_CreateThread(Update,"Update",(void*)NULL);
-    SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);
-    SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
+    if(board[0].NO==1){
+        SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);// moveball include hitcheck(so messy)
+        SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
+    }
     if(PlayNum==2){
         SDL_CreateThread(AnalyseMSG,"AnalyseMSG",(void*)NULL);
     }
@@ -803,6 +806,7 @@ void InitBoard(){
         board[i].CountPower_Bullet=0;
         board[i].CountPower_Wall=0;
         board[i].y=Board_start_y;
+        board[i].HaveNewBallCreated=false;
     }
 }
 
@@ -887,22 +891,23 @@ int AnalyseMSG(void *data){
             board[1].dx=MSG.board_dx;
             board[1].dy=MSG.board_dy;
             board[1].element=MSG.element;
-            for(int i=0;i<PlayNum;i++){
+            if(board[0].NO==2){
+                for(int i=0;i<PlayNum;i++){
                 Ball *tmp=board[i].HeadNode->next;
                 board[i].BallNum=MSG.ballMessage[i][0].BallNum;
-                for(int j=0;j<MSG.ballMessage[i][j].BallNum;j++){
+                for(int j=0;j<MSG.ballMessage[i][0].BallNum;j++){
                     tmp->dx=MSG.ballMessage[i][j].dx;
                     tmp->dy=MSG.ballMessage[i][j].dy;
                     tmp->x=MSG.ballMessage[i][j].x;
                     tmp->y=MSG.ballMessage[i][j].y;
                     tmp=tmp->next;
                 }
+                }
             }
             if(MSG.isCreatNewBall){
-                CreatBall(board[1].HeadNode,board[1].x+board[1].w/2,board[1].y-Ball_radius*2,&board[1]);            }
-            if(MSG.isLaunch){
-                Launch(&board[1]);
+                CreatBall(board[1].HeadNode,board[1].x+board[1].w/2,board[1].y-Ball_radius*2,&board[1]);
             }
+            
         }
         SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
     }
@@ -966,38 +971,35 @@ void AdjustBoardLocation(int operation,Board *board,int times){
         }
 }
 
-void SendMsg(){
+void SendMSG(){
     Message MSG;
     MSG.board_x=board[0].x;
     MSG.board_y=board[0].y;
     MSG.board_dx=board[0].dx;
     MSG.board_dy=board[0].dy;
     MSG.element=board[0].element;
-    for(int i=0;i<PlayNum;i++){
+        for(int i=0;i<PlayNum;i++){
         for(int j=0;j<board[i].BallNum;j++){
             Ball *tmp=board[i].HeadNode->next;
-            while(tmp!=NULL){
+
                         MSG.ballMessage[i][j].BallNum=board[i].BallNum;
                         MSG.ballMessage[i][j].dx=tmp->dx;
                         MSG.ballMessage[i][j].dy=tmp->dy;
                         MSG.ballMessage[i][j].x=tmp->x;
                         MSG.ballMessage[i][j].y=tmp->y;
                         tmp=tmp->next;
-                    }
                 }
                 
             }            
             if(board[0].HaveNewBallCreated){
                 MSG.isCreatNewBall=true;
-            }
-            if(IsLaunch){
-                MSG.isLaunch=true;
+                board[0].HaveNewBallCreated=false;
             }else{
-                MSG.isLaunch=false;
+                MSG.isCreatNewBall=false;
             }
             if(send(client_socket,&MSG,sizeof(Message),0)==-1){
                 perror("send");
-            }        
-}
+            }      
+    } 
 
 // 自己思考问题时候，“次序感“还是太若了，就比如adjustloacation，这种判断应该先是预测会不会超过，如果会，补齐，而不是超过了在退回
