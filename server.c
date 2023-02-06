@@ -88,7 +88,6 @@ typedef struct Bullet{
     int status;
 }Bullet;// Bullet[0]作为计数的Bullet
 typedef struct BallMessage{
-    int BallNum;
     int x;
     int y;
     int dx;
@@ -113,21 +112,19 @@ void AnalyseMSG(int NO,int instruction);
 int Thread_send(void *data);
 int Thread_listen(void *data);
 void SendMSG(int NO,Message *MSG);
-void Initgame();
-void InitBoard();
-void InitBall();
-void InitMap(int level);
 void HitBoard(Board *board,Ball *ball,int NO);
 void HitBrick(Board *board,Ball *ball,int NO);
 void HitWall(Board *board,Ball *ball,int NO);
+void InitBall();
+void InitBoard();
+void InitMap(int level);
+void InitGameObject();
 Brick map[Row+2][Col+2];
 Board board[PlayNum];
 int level=1;
 int Power_ID[3];
 int BrickLeft=55;
-int CountPower_NewBall=0;
 int CountPower_Wall=0;
-int CountPower_Bullet=0;
 bool GetPower_Wall=false;
 bool GetPower_Bullet=false;
 //void PaintFont(const char *text,int x,int y,int w,int h);
@@ -137,14 +134,11 @@ void InitMap_2();
 void InitMap_3();
 void InitMap_4();
 void InitMap_5();
-void InitGameObject();
 void LimitBoard(Board *board);
 void Launch(Board *board);
 int  dist(int x1,int y1,int x2,int y2);
 void ElementalAttack(Ball *ball,Location location);
 void DestroyBrick();
-void InitBall();
-void InitBoard();
 void GetPower();
 void AdjustBoardLocation(int operation,Board *board,int times);
 void PrintFont(const char*text);
@@ -157,14 +151,18 @@ void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
 bool IsGameOver();
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board);
-void HitBoard(Ball *ball,Board *board);
+void HitBoard(Board *board,Ball *ball,int NO);
 /*Uint32 AnalyseMSG(Uint32 interval,void *param);*/
 int MoveBoard(void *data);
 int MoveBall(void *data);
 const Uint8 *KeyValue;
+const int Window_Width=Block*18;
+const int Window_Depth=Block*15;
 int main(){
+    InitGameObject();
     WaitForConnection();
     CreatThread();
+    while(IsGameOver());
     close(socket_listen);
 }
 void WaitForConnection(){
@@ -264,8 +262,8 @@ void ExchangeMessage(){
 }
 
 void CreatThread(){
-    Thread_listen(NULL);
-    Thread_send(NULL);
+    SDL_CreateThread(Thread_listen,"Thread_listen",(void*)NULL);
+    SDL_CreateThread(Thread_send,"Thread_send",(void*)NULL);
 }
 
 int Thread_listen(void *data){
@@ -381,7 +379,6 @@ int Thread_listen(void *data){
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         for(int j=0;j<board[i].BallNum;j++){
-            MSG->ballMessage[i][j].BallNum=board[i].BallNum;
             MSG->ballMessage[i][j].dx=tmp->dx;
             MSG->ballMessage[i][j].dy=tmp->dy;
             MSG->ballMessage[i][j].x=tmp->x;
@@ -396,29 +393,7 @@ int Thread_listen(void *data){
     InitBall();
  }
 
- void InitBoard(){
-    for(int i=0;i<PlayNum;i++){
-        board[i].dx=0;
-        board[i].dy=0;
-        board[i].element=4;
-        board[i].h=Board_h;
-        board[i].w=Board_w;
-        board[i].HeadNode=(Ball *)malloc(sizeof (Ball));
-        board[i].HeadNode->next=NULL;
-        board[i].BallNum=0;
-        board[i].CountPower_NewBall=0;
-        board[i].CountPower_Bullet=0;
-        board[i].CountPower_Wall=0;
-        board[i].y=Board_start_y;
-        board[i].HaveNewBallCreated=false;
-    }
-}
 
-void InitBall(){
-    for(int i=0;i<PlayNum;i++){
-        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x,board[i].y-Ball_radius*2,&board[i]);
-    }
-}
 
 void InitMap(int level){
     switch (level){
@@ -462,10 +437,10 @@ while(1){
 }
 void GetPower(){
     for(int i=0;i<PlayNum;i++){
-        if(board[i].CountPower_Wall>=10){// 长时间的
+        if(CountPower_Wall>=10){// 长时间的
         GetPower_Wall=true;
         Power_ID[1]=SDL_AddTimer(5000,VanishPower_Wall,NULL);
-        board[i].CountPower_Wall=0;
+        CountPower_Wall=0;
         break;
         }
     }
@@ -503,20 +478,6 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
         tmp->next=DesertedBall->next;
         free(DesertedBall);
         board->BallNum--;
-    }
-}
-
-void InitMap_1(){
-    for(int i=0;i<=Row+1;i++){
-        for(int j=0;j<=Col+1;j++){
-            if(i==0||i==Row+1||j==0||j==Col+1){
-                map[i][j].status=0;
-            }else{
-                map[i][j].HP=MaxHp;
-                map[i][j].element=rand()%5;
-                map[i][j].status=1;
-            }
-        }
     }
 }
 
@@ -653,12 +614,6 @@ void HitBoard(Board *board,Ball *ball,int NO){
             return ;
     }
 
-void InitGameObject(){
-    InitMap(level);
-    InitBoard();
-    InitBall();
-}
-
 
 int dist(int x1,int y1,int x2,int y2){
     return sqrt(abs((x1-x2)*(x1-x2))+((y1-y2)*(y1-y2)));
@@ -754,4 +709,66 @@ void HitWall(Board *board,Ball *ball,int NO){
                 }
                 board[NO].CountPower_NewBall=0; 
             }         
+}
+
+void InitGameObject(){
+    InitMap(level);
+    InitBoard();
+    InitBall();
+}
+
+void InitBoard(){
+    for(int i=0;i<PlayNum;i++){
+        board[i].dx=0;
+        board[i].dy=0;
+        board[i].element=4;
+        board[i].h=Board_h;
+        board[i].w=Board_w;
+        board[i].HeadNode=(Ball *)malloc(sizeof (Ball));
+        board[i].HeadNode->next=NULL;
+        board[i].BallNum=0;
+        board[i].CountPower_NewBall=0;
+        board[i].CountPower_Bullet=0;
+        CountPower_Wall=0;
+        board[i].y=Board_start_y;
+        board[i].x=Block*4*(i-1)+Board_start_x;
+        board[i].HaveNewBallCreated=false;
+    }
+}
+
+void InitBall(){
+    for(int i=0;i<PlayNum;i++){
+        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x,board[i].y-Ball_radius*2,&board[i]);
+    }
+}
+
+
+
+void InitMap_1(){
+    for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if(i==0||i==Row+1||j==0||j==Col+1){
+                map[i][j].status=0;
+            }else{
+                map[i][j].HP=MaxHp;
+                map[i][j].element=rand()%5;
+                map[i][j].status=1;
+            }
+        }
+    }
+}
+
+bool IsGameOver(){
+    if(BrickLeft<=0){
+        if(level=5){
+            //Win();
+            return 1;
+        }else{
+            level++;
+            Initgame();
+            return 0;
+        }
+    }else{
+        return 0;
+    }
 }

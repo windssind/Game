@@ -84,21 +84,14 @@ typedef struct Bullet{
     int status;
 }Bullet;// Bullet[0]作为计数的Bullet
 typedef struct BallMessage{
-    int BallNum;
     int x;
     int y;
     int dx;
     int dy;
 }BallMessage;
 typedef struct Message{
-    int board_x;
-    int board_y;
-    int board_dx;
-    int board_dy;
-    int CountPower_NewBall;
-    enum Element element; 
-    bool isChangeColor;
-    bool isCreatNewBall;
+    Brick map[Row+2][Col+2];
+    Board board[2];
     BallMessage ballMessage[2][4];
 }Message;
 
@@ -140,6 +133,9 @@ void InitGameObject();
 void LimitBoard(Board *board);
 void Launch(Board *board);
 void Load();
+void AnalyseMSG_Board(Message *MSG);
+void AnalyseMSG_Ball(Message *MSG);
+void AnalyseMSG_Map(Message *MSG);
 void HitWall(Board *board,Ball *ball,int NO);
 int SendMSG(void *data);
 int  dist(int x1,int y1,int x2,int y2);
@@ -178,7 +174,7 @@ SDL_Surface *MainBackgroundSurface;
 SDL_Texture *MainBackgroundTexture;
 SDL_Rect BackgroundRect;
 const Uint8 *KeyValue;
- int PlayNum;
+int PlayNum;
 void beginTimer();
 void closeTimer();
 void Quit();
@@ -218,20 +214,6 @@ void BuildConnection(int argc,char *argv[]){
     //建立好连接之后，就可以释放了
     freeaddrinfo(result);
     // 已经建立好连接了，现在开始接受信息
-    int NO;
-    int recvbytes=recv(client_socket,&NO,MaxExcutable,0);//第三个参数是最大能接受的字节长度
-    if(NO==1){
-        board[0].NO=1;
-        board[1].NO=2;
-    }else if(NO==2){
-        board[0].NO=2;
-        board[1].NO=1;
-    }else{
-        printf("decide who is first fail\n");
-    }
-    for(int i=0;i<PlayNum;i++){
-        board[i].x=(board[i].NO-1)*Block*4+Board_start_x;
-    }
     return;
 }
 void InitAll(){
@@ -464,7 +446,7 @@ void beginTimer(){
         SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
     }
     if(PlayNum==2){
-        SDL_CreateThread(SendMSG,"SendMSG",(void*)NULL);
+       /*SDL_CreateThread(SendMSG,"SendMSG",(void*)NULL);*/
         SDL_CreateThread(AnalyseMSG,"AnalyseMSG",(void*)NULL);
     }
 }
@@ -729,7 +711,6 @@ bool IsGameOver(){
 }
 
 void Initgame(){
-    DeleteBullet();
     InitGameObject();
 }
 
@@ -783,7 +764,8 @@ void InitBoard(){
 
 void InitBall(){
     for(int i=0;i<PlayNum;i++){
-        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x,board[i].y-Ball_radius*2,&board[i]);
+        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-Ball_radius*2,&board[i]);
+        printf("ball:x=%d\n",board[i].HeadNode->next->x);
     }
 }
 
@@ -857,28 +839,11 @@ int AnalyseMSG(void *data){
         Message MSG;
         int first=clock();
         if(recv(client_socket,&MSG,sizeof(Message),MSG_DONTWAIT)>=0){
-            board[1].x=MSG.board_x;
-            board[1].y=MSG.board_y;
-            board[1].dx=MSG.board_dx;
-            board[1].dy=MSG.board_dy;
-            board[1].element=MSG.element;
-            if(board[0].NO==2){
-                for(int i=0;i<PlayNum;i++){
-                Ball *tmp=board[i].HeadNode->next;
-                board[i].BallNum=MSG.ballMessage[i][0].BallNum;
-                for(int j=0;j<MSG.ballMessage[i][0].BallNum;j++){
-                    tmp->dx=MSG.ballMessage[i][j].dx;
-                    tmp->dy=MSG.ballMessage[i][j].dy;
-                    tmp->x=MSG.ballMessage[i][j].x;
-                    tmp->y=MSG.ballMessage[i][j].y;
-                    tmp=tmp->next;
-                }
-                }
-            }
-            if(MSG.isCreatNewBall){
-                CreatBall(board[1].HeadNode,board[1].x+board[1].w/2,board[1].y-Ball_radius*2,&board[1]);
-            }
-            
+            AnalyseMSG_Board(&MSG);
+            AnalyseMSG_Ball(&MSG);
+            printf("enter2\n");
+            AnalyseMSG_Map(&MSG);
+            printf("enter3\n");
         }
         SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
     }
@@ -1011,4 +976,41 @@ void HitWall(Board *board,Ball *ball,int NO){
                 }
                 board[NO].CountPower_NewBall=0; 
             }         
+}
+
+void AnalyseMSG_Board(Message *MSG){
+    for(int i=0;i<PlayNum;i++){
+        board[i]=MSG->board[i];
+    }
+}
+
+void AnalyseMSG_Ball(Message *MSG){
+    for(int i=0;i<PlayNum;i++){
+        if(MSG->board[i].HaveNewBallCreated==true){
+            CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-Ball_radius*2,&board[i]);
+        }
+    }
+    for(int i=0;i<PlayNum;i++){
+        Ball *tmp=board[i].HeadNode->next;
+        if(tmp==NULL){
+            printf("yes\n");
+        }else{
+            printf("wrong\n");
+        }
+        for(int j=0;j<MSG->board[i].BallNum;j++){
+            tmp->dx=MSG->ballMessage[i][j].dx;
+            tmp->dy=MSG->ballMessage[i][j].dy;
+            tmp->y=MSG->ballMessage[i][j].y;
+            tmp->x=MSG->ballMessage[i][j].x;
+            tmp=tmp->next;
+        }
+    }
+}
+
+void AnalyseMSG_Map(Message *MSG){
+   for(int i=0;i<Row+2;i++){
+        for(int j=0;j<Col+2;j++){
+            map[i][j]=MSG->map[i][j];
+        }
+   }
 }
