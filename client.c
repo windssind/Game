@@ -2,15 +2,15 @@
 #include<math.h>
 #include<stdbool.h>
 #define MaxExcutable 100
-#define Block 50
+#define Block 60
 #define Board_Vx 10
 #define Board_Vy 10
 #define Board_h 15
 #define Board_w 170
 #define Board_start_x Block*4
-#define Board_start_y Block*14
+#define Board_start_y Block*12
 #define Ball_radius 13
-#define Col 15
+#define Col 18
 #define Row 8
 #define UP 1
 #define LEFT 2
@@ -21,6 +21,7 @@
 #define LaunchBall 7
 #define MaxHp 4
 #define FPS 30
+#define QuitGame 8
 #undef main
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
@@ -59,7 +60,6 @@ typedef struct Board{
     int BallNum;
     int CountPower_Bullet;
     int CountPower_NewBall;
-    int CountPower_Wall;
     int dx;
     int dy;
     int x;
@@ -111,8 +111,8 @@ SDL_Window *Window=NULL;
 SDL_Renderer *Renderer=NULL;
 TTF_Font *font;
 SDL_Color FontColor={0,0,0,255};
-const int Window_Width=Block*15;
-const int Window_Depth=Block*18;
+const int Window_Width=Block*18;
+const int Window_Depth=Block*15;
 int client_socket;
 int level=1;
 int Power_ID[3];
@@ -140,7 +140,8 @@ void InitGameObject();
 void LimitBoard(Board *board);
 void Launch(Board *board);
 void Load();
-void SendMSG();
+void HitWall(Board *board,Ball *ball,int NO);
+int SendMSG(void *data);
 int  dist(int x1,int y1,int x2,int y2);
 void ElementalAttack(Ball *ball,Location location);
 void DeleteBullet();
@@ -158,12 +159,12 @@ Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
 int Update(void *data);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
-void HitBrick(int x,int y,Ball *ball);
+void HitBrick(Board *board,Ball *ball,int NO);
 void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
 bool IsGameOver();
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board);
-void HitBoard(Ball *ball,Board *board);
+void HitBoard(Board *board,Ball *ball,int NO);
 /*Uint32 AnalyseMSG(Uint32 interval,void *param);*/
 int AnalyseMSG(void *data);
 int MoveBoard(void *data);
@@ -187,7 +188,7 @@ int main(int argc,char *argv[]){
     if(PlayNum==2){
         BuildConnection(argc,argv);
     }
-    beginTimer();
+    beginTimer(&PlayNum);
     while(!IsGameOver());
     /*closeTimer();
     Quit();*/
@@ -332,16 +333,20 @@ int MoveBoard(void *data){
                 times=1;
             }
         if (KeyValue[SDL_SCANCODE_W]||KeyValue[SDL_SCANCODE_UP]){
-            AdjustBoardLocation(UP,&board[0],times);
+            board[0].dy=-Board_Vy*times;
+            board[0].y+=board[0].dy;
         }else if(KeyValue[SDL_SCANCODE_S]||KeyValue[SDL_SCANCODE_DOWN]){
-            AdjustBoardLocation(DOWN,&board[0],times);
+            board[0].dy=Board_Vy*times;
+            board[0].y+=board[0].dy;
         }else{
             board[0].dy=0;
         }
         if(KeyValue[SDL_SCANCODE_A]||KeyValue[SDL_SCANCODE_LEFT]){
-            AdjustBoardLocation(LEFT,&board[0],times);
+            board[0].dx=-Board_Vx*times;
+            board[0].x+=board[0].dx;
         }else if(KeyValue[SDL_SCANCODE_D]||KeyValue[SDL_SCANCODE_RIGHT]){
-            AdjustBoardLocation(RIGHT,&board[0],times);
+            board[0].dx=Board_Vx*times;
+            board[0].x+=board[0].dx;
         }else{
             board[0].dx=0;
         }
@@ -351,7 +356,7 @@ int MoveBoard(void *data){
         if(KeyValue[SDL_SCANCODE_H]){
             Launch(&board[0]);
         }
-        //LimitBoard(&board[0]);
+        LimitBoard(&board[0]);
         while(SDL_PollEvent(&event)){
             if(event.type==SDL_QUIT){
                 Quit();
@@ -362,7 +367,7 @@ int MoveBoard(void *data){
             } 
         }
         if(PlayNum==2){
-            SendMSG();
+            SendMSG(NULL);
         }
      SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
         }
@@ -378,54 +383,27 @@ while(1){
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
-            if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Block*15){// 左边碰撞或者右边碰撞
-                tmp->dx=-tmp->dx;
-            }else if(tmp->y-tmp->radius<=0){// 上边碰撞
-                tmp->dy=-tmp->dy;
-            }else if(tmp->y+tmp->radius>=Block*17.4){// 下边碰撞
-                if(GetPower_Wall){// 用playnum来维护有多少个挡板
-                    tmp->dy=-tmp->dy;
-                }else{// 没有墙壁
-                    if(board[i].BallNum==1){// 
-                        board->HeadNode->next->dx=0;
-                        board->HeadNode->next->dy=0;
-                        board->HeadNode->next->element=board[i].element;
-                        board->HeadNode->next->x=board[i].x+board[i].w/2;
-                        board->HeadNode->next->y=board[i].y-board->HeadNode->next->radius*2;
-                    }else{
-                        DeleteBall(board[i].HeadNode,tmp,&board[i]);
-                    }
-                    board[i].CountPower_Wall++;
-                }
-                board[i].CountPower_NewBall=0;          
-            }else{//(和砖块碰撞，有点复杂)
-                HitBoard(tmp,board);
-                HitBrick(tmp->x,tmp->y,tmp);
-            }
-            //
+            HitWall(&board[i],tmp,i);
+            HitBoard(&board[i],tmp,i);
+            HitBrick(&board[i],tmp,i);
             tmp->x+=tmp->dx;
             tmp->y+=tmp->dy;
-            //
             if(tmp->dx==0&&tmp->dy==0){
                 tmp->x=board[i].x+board[i].w/2;
                 tmp->y=board[i].y-tmp->radius*2;
             }
-            // 
+            DestroyBrick();
             tmp=tmp->next;// 有bug，如果delete了，就会有问题
-            // 
         }
+        GetPower();
     }
-    GetPower();
     SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
     }
 }
 void GetPower(){
-    for(int i=0;i<PlayNum;i++){
-        if(board[i].CountPower_Wall>=10){// 长时间的
+        if(CountPower_Wall>=10*PlayNum){// 长时间的
         GetPower_Wall=true;
         Power_ID[1]=SDL_AddTimer(5000,VanishPower_Wall,NULL);
-        board[i].CountPower_Wall=0;
-        break;
         }
     }
     
@@ -434,7 +412,7 @@ void GetPower(){
         Power_ID[2]=SDL_AddTimer(60,CreatAndMoveAndHitCheckBullet,NULL);
         Power_ID[3]=SDL_AddTimer(5000,VanishPower_Bullet,NULL);
     }*/
- }
+ 
 Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board){//用链表结构
     Ball *newBall=(Ball*)malloc(sizeof(Ball));
     newBall->x=x;
@@ -481,11 +459,12 @@ void InitMap_1(){
 
 void beginTimer(){
     SDL_CreateThread(Update,"Update",(void*)NULL);
-    if(board[0].NO==1){
+    if(PlayNum==1){
         SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);// moveball include hitcheck(so messy)
         SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
     }
     if(PlayNum==2){
+        SDL_CreateThread(SendMSG,"SendMSG",(void*)NULL);
         SDL_CreateThread(AnalyseMSG,"AnalyseMSG",(void*)NULL);
     }
 }
@@ -524,8 +503,10 @@ void Load(){
 // 可以使用Timer函数来代替SDL——delay(是必须，用SDL_Addtimer),update,move
 // 判断元素反应，用音效来区分
 
-void HitBrick(int x,int y,Ball *ball){
+void HitBrick(Board *board,Ball *ball,int NO){
     Location location;
+    int x=ball->x;
+    int y=ball->y;
     int col=x/Block+1;
     int row=y/Block+1;
     if(col>=0&&col<=Col+1&&row>=0&&row<=Row+1){// 有碰撞的可能
@@ -566,12 +547,8 @@ void HitBrick(int x,int y,Ball *ball){
             return ;
         }
         ElementalAttack(ball,location);
-        DestroyBrick();
         /*GetPower();*/
         /*这个地方误差值+3的引入很巧妙，肉眼无法观察，但完美解决了碰撞问题*/
-    }else{
-        DestroyBrick();
-        return ;
     }
 }
 
@@ -641,26 +618,20 @@ void DestroyBrick(){
     }
 }
 
-void HitBoard(Ball *ball,Board *board){
-    for(int i=0;i<PlayNum;i++){
-        if(ball->dy>0&&ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y-10&&ball->y+board[i].HeadNode->next->radius<=board[i].y+board[i].h*2){
-            ball->dx=ball->dx+board[i].dx/3;
-            ball->dy=-ball->dy+board[i].dy/6;
-            ball->element=board[i].element;
-            if(i==0){
-                board[i].CountPower_NewBall++;
+void HitBoard(Board *board,Ball *ball,int NO){
+        if(ball->dy>0&&ball->x>=board[NO].x&&ball->x<=board[NO].x+board[NO].w&&ball->y+ball->radius>=board[NO].y-10&&ball->y+board[NO].HeadNode->next->radius<=board[NO].y+board[NO].h*2){
+            ball->dx=ball->dx+board[NO].dx/3;
+            ball->dy=-ball->dy+board[NO].dy/6;
+            ball->element=board[NO].element;
+            board[NO].CountPower_NewBall++;
+            if(board[NO].CountPower_NewBall>=4&&board[NO].BallNum<=3){
+                CreatBall(board[NO].HeadNode,board[NO].x+board[NO].w/2,board[NO].y-ball->radius*2,&board[NO]);
+                board[NO].HaveNewBallCreated=true;
+                board[NO].CountPower_NewBall=0;
             }
-            if(board[i].CountPower_NewBall>=4&&board[i].BallNum<=3){
-                if(i==0){// 创造球的工作让主玩家来做，通过同步机制来使得球同步  可以说，次要玩家的这个变量是废除掉了，但还是两边都需要creatball的，内存这是绕不开的
-                    CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-ball->radius*2,&board[i]);
-                    board[i].HaveNewBallCreated=true;
-                    board[i].CountPower_NewBall=0;
-                }
-            }
-            return ;
         }
+            return ;
     }
-}
 
 Uint32 VanishPower_Wall(Uint32 interval,void *param){
     GetPower_Wall=false;
@@ -804,7 +775,7 @@ void InitBoard(){
         board[i].BallNum=0;
         board[i].CountPower_NewBall=0;
         board[i].CountPower_Bullet=0;
-        board[i].CountPower_Wall=0;
+        CountPower_Wall=0;
         board[i].y=Board_start_y;
         board[i].HaveNewBallCreated=false;
     }
@@ -929,11 +900,7 @@ int AnalyseMSG(void *data){
 
 void AdjustBoardLocation(int operation,Board *board,int times){
     if(operation==RIGHT){
-        if(board->x+board->w<=board[1].x&&board->x+Board_Vx*times+board->w>=board[1].x&&((board->y+board->h>board[1].y&&board->y<=board[1].y)||board->y>=board[1].y&&board->y<board[1].y+board[1].h)){
-            board->x=board[1].x-board->w;
-        }else{
-            board->x+=Board_Vx*times;
-        }
+        
     }else if(operation==LEFT){
         if(board->x>=board[1].x+board[1].w&&board->x-Board_Vx*times<=board[1].x+board->w&&((board->y+board->h>board[1].y&&board->y<=board[1].y)||board->y>=board[1].y&&board->y<board[1].y+board[1].h)){
             board->x=board[1].x+board[1].w;
@@ -954,52 +921,94 @@ void AdjustBoardLocation(int operation,Board *board,int times){
         }
     }
     if(board->x<=0){
-            board->x=0;
-            board->dx=0;
-        }
-        if(board->x+board->w>=Block*15){
-            board->x=Block*15-board->w;
-            board->dx=0;
-        }
-        if(board->y<=Block*14){
-            board->y=Block*14;
-            board->dy=0;
-        }
-        if(board->y+board->h>=Block*18){
-            board->y=Block*18-board->h;
-            board->dy=0;
-        }
+        board->x=0;
+        board->dx=0;
+    }
+    if(board->x+board->w>=Block*15){
+        board->x=Block*15-board->w;
+        board->dx=0;
+    }
+    if(board->y<=Block*14){
+        board->y=Block*14;
+        board->dy=0;
+    }
+    if(board->y+board->h>=Block*18){
+        board->y=Block*18-board->h;
+        board->dy=0;
+    }
 }
 
-void SendMSG(){
-    Message MSG;
-    MSG.board_x=board[0].x;
-    MSG.board_y=board[0].y;
-    MSG.board_dx=board[0].dx;
-    MSG.board_dy=board[0].dy;
-    MSG.element=board[0].element;
-        for(int i=0;i<PlayNum;i++){
-        for(int j=0;j<board[i].BallNum;j++){
-            Ball *tmp=board[i].HeadNode->next;
-
-                        MSG.ballMessage[i][j].BallNum=board[i].BallNum;
-                        MSG.ballMessage[i][j].dx=tmp->dx;
-                        MSG.ballMessage[i][j].dy=tmp->dy;
-                        MSG.ballMessage[i][j].x=tmp->x;
-                        MSG.ballMessage[i][j].y=tmp->y;
-                        tmp=tmp->next;
-                }
-                
-            }            
-            if(board[0].HaveNewBallCreated){
-                MSG.isCreatNewBall=true;
-                board[0].HaveNewBallCreated=false;
-            }else{
-                MSG.isCreatNewBall=false;
+int SendMSG(void *data){
+    int MSG;
+    SDL_Event event;
+    while(1){
+        int first=clock();
+        if(KeyValue[SDL_SCANCODE_W]){
+            MSG=UP;
+        }else if(KeyValue[SDL_SCANCODE_S]){
+            MSG=DOWN;
+        }else if(KeyValue[SDL_SCANCODE_A]){
+            MSG=LEFT;
+        }else if(KeyValue[SDL_SCANCODE_D]){
+            MSG=RIGHT;
+        }
+        while(SDL_PollEvent(&event)){
+            if(event.type==SDL_QUIT){
+                MSG=QuitGame;
             }
-            if(send(client_socket,&MSG,sizeof(Message),0)==-1){
-                perror("send");
-            }      
+        }
+        int sendbytes=send(client_socket,&MSG,sizeof (int) ,MSG_DONTWAIT);
+        if(sendbytes==-1){
+            printf("send msg to server failed\n");
+        }else if(sendbytes==0){
+            printf("disconnected\n");
+        }
+        SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
     } 
+}              
 
 // 自己思考问题时候，“次序感“还是太若了，就比如adjustloacation，这种判断应该先是预测会不会超过，如果会，补齐，而不是超过了在退回
+
+void LimitBoard(Board *board){
+    if(board->x<=0){
+        board->x=0;
+        board->dx=0;
+    }
+    if(board->x+board->w>=Window_Width){
+        board->x=Window_Width-board->w;
+        board->dx=0;
+    }
+    if(board->y<=Window_Depth-Block*3){
+        board->y=Window_Depth-Block*3;
+        board->dy=0;
+    }
+    if(board->y+board->h>=Window_Depth){
+        board->y=Window_Depth-board->h;
+        board->dy=0;
+    }
+}
+
+void HitWall(Board *board,Ball *ball,int NO){
+    Ball *tmp=ball;
+            if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Window_Width){// 左边碰撞或者右边碰撞
+                tmp->dx=-tmp->dx;
+            }else if(tmp->y-tmp->radius<=0){// 上边碰撞
+                tmp->dy=-tmp->dy;
+            }else if(tmp->y+tmp->radius>=Window_Depth-Block*0.4){// 下边碰撞
+                if(GetPower_Wall){// 用playnum来维护有多少个挡板
+                    tmp->dy=-tmp->dy;
+                }else{// 没有墙壁
+                    if(board[NO].BallNum==1){// 
+                        board->HeadNode->next->dx=0;
+                        board->HeadNode->next->dy=0;
+                        board->HeadNode->next->element=board[NO].element;
+                        board->HeadNode->next->x=board[NO].x+board[NO].w/2;
+                        board->HeadNode->next->y=board[NO].y-board->HeadNode->next->radius*2;
+                    }else{
+                        DeleteBall(board[NO].HeadNode,tmp,&board[NO]);
+                    }
+                    CountPower_Wall++;
+                }
+                board[NO].CountPower_NewBall=0; 
+            }         
+}
