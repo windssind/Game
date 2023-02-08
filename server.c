@@ -3,15 +3,15 @@
 #include<math.h>
 #include<stdbool.h>
 #define MaxExcutable 100
-#define Block 50
+#define Block 60
 #define Board_Vx 10
 #define Board_Vy 10
 #define Board_h 15
 #define Board_w 170
 #define Board_start_x Block*4
-#define Board_start_y Block*14
+#define Board_start_y Block*12
 #define Ball_radius 13
-#define Col 15
+#define Col 18
 #define Row 8
 #define UP 1
 #define LEFT 2
@@ -20,6 +20,8 @@
 #define BoardColorChange 5
 #define DisConnected 6
 #define LaunchBall 7
+#define QuitGame 8
+#define Shift 9
 #define MaxHp 4
 #define FPS 30
 #undef main
@@ -62,7 +64,6 @@ typedef struct Board{
     enum Element element;
     Ball *HeadNode;
     int BallNum;
-    int CountPower_Bullet;
     int CountPower_NewBall;
     int dx;
     int dy;
@@ -72,43 +73,50 @@ typedef struct Board{
     int h;
     int NO;//
     bool HaveNewBallCreated;
+    bool HaveNewBallDeleted;
 }Board;
 typedef struct Location{
     int x;
     int y;
 }Location;
 
-typedef struct Bullet{
-    int x;
-    int y;
-    int dy;
-    int BulletLength;
-    int BulletDistance;
-    int BulletNum;
-    int status;
-}Bullet;// Bullet[0]作为计数的Bullet
 typedef struct BallMessage{
     int x;
     int y;
     int dx;
     int dy;
+    bool HaveNewBallCreated;
+    bool HaveNewBallDeleted;
 }BallMessage;
 typedef struct Message{
     Brick map[Row+2][Col+2];
     Board board[2];
     BallMessage ballMessage[2][4];
+    bool HaveNewBallCreated;
+    bool HaveNewBallDeleted;
 }Message;
+typedef struct MessageFromClient{
+    bool IsUP;
+    bool IsDown;
+    bool IsLeft;
+    bool IsRight;
+    bool IsQuitGame;
+    int  ChangeColor;
+    bool IsShift;
+    bool IsLaunchBall;
+}MessageFromClient;
+
 Board board[2];// two board
 int socket_listen;// 监听的套接字
 int Player_socket[PlayNum];// 服务于 player 的套接字
 void WaitForConnection();
 void ExchangeMessage();
-void RecvMSG(int NO,int *MSG);
+void RecvMSG(int NO,MessageFromClient *MSG);
 void CreatThread();
 void CopyMap(Message *MSG);
 void CopyBoard(Message *MSG);
 void CopyBall(Message *MSG);
-void AnalyseMSG(int NO,int instruction);
+void AnalyseMSG(int NO,MessageFromClient *instruction);
 int Thread_send(void *data);
 int Thread_listen(void *data);
 void SendMSG(int NO,Message *MSG);
@@ -119,6 +127,9 @@ void InitBall();
 void InitBoard();
 void InitMap(int level);
 void InitGameObject();
+void LimitBoard(Board *board);
+void Server_Quit();
+void BallNumChange(Message *MSG);
 Brick map[Row+2][Col+2];
 Board board[PlayNum];
 int level=1;
@@ -162,7 +173,7 @@ int main(){
     InitGameObject();
     WaitForConnection();
     CreatThread();
-    while(IsGameOver());
+    while(!IsGameOver());
     close(socket_listen);
 }
 void WaitForConnection(){
@@ -206,64 +217,34 @@ void WaitForConnection(){
     int NO=1;
     for(int i=1;i<PlayNum+1;i++,NO++){//发送连接成功的消息
         sendbytes=send(Player_socket[i-1],&NO,sizeof(int),0);// strlen+1，可以把/0也穿过去
-        printf("sendbytes=%d\n",sendbytes);
         if(sendbytes==-1){
             fprintf(stderr,"Though Connection Established,the good news failed");
             exit(1);
         }
     }
-    
+    // init news
+    for(int i=0;i<PlayNum;i++){
+        board[i].HaveNewBallCreated=false;
+        board[i].HaveNewBallDeleted=false;
+    }
+    Message MSG;
+    BallNumChange(&MSG);
+    CopyMap(&MSG);
+    CopyBoard(&MSG);
+    CopyBall(&MSG);
+    for(int i=0;i<PlayNum;i++){
+        SendMSG(i,&MSG);
+    }
+    printf("send MSG init win\n");
 }
 
-void ExchangeMessage(){
-    int recvbytes,sendbytes;
-    fd_set set;
-    FD_ZERO(&set);
-    for(int i=0;i<PlayNum;i++){
-        FD_SET(Player_socket[i],&set);
-    }
-    Message buf;
-    while(1){
-        fd_set readset=set;
-        if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,NULL)>0){
-            printf("enter\n");
-            for(int i=0;i<PlayNum;i++){
-                if(FD_ISSET(Player_socket[i],&readset)){
-                    recvbytes=recv(Player_socket[i],&buf,sizeof(Message),0);
-                    if(recvbytes==0){
-                        fprintf(stderr,"Player%d disconnected\n ",i+1);
-                        for(int i=0;i<PlayNum;i++){
-                            close(Player_socket[i]);
-                        }
-                        break;
-                    }else if(recvbytes==-1){
-                        fprintf(stderr,"recv Player%d fail\n",i==0?1:2);
-                    }else{
-                        printf("recvbytes=%d\n",recvbytes);
-                    }
-                    sendbytes=send(Player_socket[i==0?1:0],&buf,sizeof(Message),0);
-                    if(sendbytes==0){
-                        fprintf(stderr,"Player%d\n disconnected",i+1);
-                        for(int i=0;i<PlayNum;i++){
-                            close(Player_socket[i]);
-                        }
-                        break;
-                    }else if(sendbytes==-1){
-                        fprintf(stderr,"send to Player%d fail\n",~i+1);
-                    }else{
-                        printf("snedbytes=%d\n",sendbytes);
-                    }
-                    
-                    memset(&buf,0,sizeof(Message));
-                }
-            }
-        }
-    }
-}
+
 
 void CreatThread(){
     SDL_CreateThread(Thread_listen,"Thread_listen",(void*)NULL);
     SDL_CreateThread(Thread_send,"Thread_send",(void*)NULL);
+    SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);
+        
 }
 
 int Thread_listen(void *data){
@@ -275,15 +256,15 @@ int Thread_listen(void *data){
     for(int i=0;i<PlayNum;i++){
         FD_SET(Player_socket[i],&set);
     }
-    int MSG;
+    MessageFromClient MSG;
     while(1){
         fd_set readset=set;
-        if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,&interval)>0){
+        if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,NULL)>0){
             for(int i=0;i<PlayNum;i++){
                 if(FD_ISSET(Player_socket[i],&readset)){
                     RecvMSG(i,&MSG);
                     // recv then analyse        
-                    AnalyseMSG(i,MSG);
+                    AnalyseMSG(i,&MSG);
                 }else{
                     board[i].dx=0;
                     board[i].dy=0;
@@ -298,28 +279,27 @@ int Thread_listen(void *data){
     }
 }
 
- void AnalyseMSG(int NO,int instruction){
-    switch(instruction){
-        case UP:
-            AdjustBoardLocation(UP,&board[NO],1);
-            break;
-        case DOWN:
-            AdjustBoardLocation(DOWN,&board[0],1);
-            break;
-        case LEFT:
-            AdjustBoardLocation(LEFT,&board[0],1);
-            break;
-        case RIGHT:
-            AdjustBoardLocation(RIGHT,&board[0],1);
-            break;
-        default:
-            break;
+ void AnalyseMSG(int NO,MessageFromClient *instruction){
+    int times=(instruction->IsShift==true?2:1);
+    if(instruction->IsUP){
+        AdjustBoardLocation(UP,&board[NO],times);
+    }if(instruction->IsDown){
+        AdjustBoardLocation(DOWN,&board[NO],times);
+    }if(instruction->IsLeft){
+        AdjustBoardLocation(LEFT,&board[NO],times);
+    }if(instruction->IsRight){
+        AdjustBoardLocation(RIGHT,&board[NO],times);
+    }if(instruction->IsQuitGame){
+        Server_Quit();
+    }if(instruction->IsLaunchBall){
+        printf("launch board ready\n");
+        Launch(&board[NO]);
     }
+    board[NO].element=instruction->ChangeColor;
  }
 
- void RecvMSG(int NO,int *MSG){
-    while(1){
-        int recvbytes=recv(Player_socket[NO],MSG,sizeof(int),MSG_DONTWAIT);
+ void RecvMSG(int NO,MessageFromClient *MSG){
+        int recvbytes=recv(Player_socket[NO],MSG,sizeof(MessageFromClient),0);
         if(recvbytes==0){
         fprintf(stderr,"Player%d disconnected\n ",NO+1);
         for(int i=0;i<PlayNum;i++){
@@ -327,16 +307,15 @@ int Thread_listen(void *data){
         }
         }else if(recvbytes==-1){
             fprintf(stderr,"recv Player%d fail\n",NO==0?1:2);
-        }else{
-        printf("recvbytes=%d\n",recvbytes);
         }
     }
- }
+
 
  int Thread_send(void *data){
     while(1){
         int first=clock();
         Message MSG;
+        BallNumChange(&MSG);
         CopyMap(&MSG);
         CopyBoard(&MSG);
         CopyBall(&MSG);
@@ -356,8 +335,6 @@ int Thread_listen(void *data){
         }
     }else if(sendbytes==-1){
         fprintf(stderr,"send to Player%d fail\n",NO+1);
-    }else{
-        printf("snedbytes=%d\n",sendbytes);
     }
  }
 
@@ -383,6 +360,7 @@ int Thread_listen(void *data){
             MSG->ballMessage[i][j].dy=tmp->dy;
             MSG->ballMessage[i][j].x=tmp->x;
             MSG->ballMessage[i][j].y=tmp->y;
+            tmp=tmp->next;
         }
     }
  }
@@ -418,14 +396,15 @@ while(1){
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
-            HitWall(&board[i],tmp,i);
-            HitBoard(&board[i],tmp,i);
-            HitBrick(&board[i],tmp,i);
-            tmp->x+=tmp->dx;
-            tmp->y+=tmp->dy;
+            HitWall(board,tmp,i);
+            HitBoard(board,tmp,i);
+            HitBrick(board,tmp,i);
             if(tmp->dx==0&&tmp->dy==0){
                 tmp->x=board[i].x+board[i].w/2;
                 tmp->y=board[i].y-tmp->radius*2;
+            }else{
+                tmp->x+=tmp->dx;
+                tmp->y+=tmp->dy;
             }
             DestroyBrick();
             tmp=tmp->next;// 有bug，如果delete了，就会有问题
@@ -478,6 +457,9 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
         tmp->next=DesertedBall->next;
         free(DesertedBall);
         board->BallNum--;
+    }
+    if(PlayNum==2){
+        board->HaveNewBallDeleted=true;
     }
 }
 
@@ -609,10 +591,12 @@ void HitBoard(Board *board,Ball *ball,int NO){
                 CreatBall(board[NO].HeadNode,board[NO].x+board[NO].w/2,board[NO].y-ball->radius*2,&board[NO]);
                 board[NO].HaveNewBallCreated=true;
                 board[NO].CountPower_NewBall=0;
+            }else{
+                board[NO].HaveNewBallCreated=false;
             }
-        }
-            return ;
+
     }
+}
 
 
 int dist(int x1,int y1,int x2,int y2){
@@ -624,6 +608,7 @@ void Launch(Board *board){
     Ball *tmp=board->HeadNode->next;
     while(tmp!=NULL){
         if(tmp->dx==0&&tmp->dy==0){
+            printf("enter launchball\n");
             tmp->dx=0;
             tmp->dy=-10;
             return ;
@@ -646,6 +631,7 @@ void AdjustBoardLocation(int operation,Board *board,int times){
             board->x-=Board_Vx*times;
         }
     }else if(operation==DOWN){
+        printf("down enter\n");
         if(board->y<=board[1].y&&board->y+board->h+Board_Vy*times>=board[1].y&&((board->x+board->w>board[1].x&&board->x<=board[1].x)||board->x>=board[1].x&&board->x<board[1].x+board[1].w)){
             board->y=board[1].y-board->h;
         }else{
@@ -658,22 +644,7 @@ void AdjustBoardLocation(int operation,Board *board,int times){
             board->y-=Board_Vy*times;
         }
     }
-    if(board->x<=0){
-            board->x=0;
-            board->dx=0;
-        }
-        if(board->x+board->w>=Block*15){
-            board->x=Block*15-board->w;
-            board->dx=0;
-        }
-        if(board->y<=Block*14){
-            board->y=Block*14;
-            board->dy=0;
-        }
-        if(board->y+board->h>=Block*18){
-            board->y=Block*18-board->h;
-            board->dy=0;
-        }
+    LimitBoard(board);
 }
 
 void InitMap_2(){
@@ -697,13 +668,15 @@ void HitWall(Board *board,Ball *ball,int NO){
                     tmp->dy=-tmp->dy;
                 }else{// 没有墙壁
                     if(board[NO].BallNum==1){// 
-                        board->HeadNode->next->dx=0;
-                        board->HeadNode->next->dy=0;
-                        board->HeadNode->next->element=board[NO].element;
-                        board->HeadNode->next->x=board[NO].x+board[NO].w/2;
-                        board->HeadNode->next->y=board[NO].y-board->HeadNode->next->radius*2;
+                    printf("x=board[%d]=%d\n",NO,board[NO].x);
+                        board[NO].HeadNode->next->dx=0;
+                        board[NO].HeadNode->next->dy=0;
+                        board[NO].HeadNode->next->element=board[NO].element;
+                        board[NO].HeadNode->next->x=board[NO].x+board[NO].w/2;
+                        board[NO].HeadNode->next->y=board[NO].y-Ball_radius*2;
                     }else{
                         DeleteBall(board[NO].HeadNode,tmp,&board[NO]);
+                        board[NO].HaveNewBallDeleted=true;
                     }
                     CountPower_Wall++;
                 }
@@ -728,17 +701,17 @@ void InitBoard(){
         board[i].HeadNode->next=NULL;
         board[i].BallNum=0;
         board[i].CountPower_NewBall=0;
-        board[i].CountPower_Bullet=0;
         CountPower_Wall=0;
         board[i].y=Board_start_y;
-        board[i].x=Block*4*(i-1)+Board_start_x;
+        board[i].x=Block*4*i+Board_start_x;
         board[i].HaveNewBallCreated=false;
+        board[i].HaveNewBallDeleted=false;
     }
 }
 
 void InitBall(){
     for(int i=0;i<PlayNum;i++){
-        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x,board[i].y-Ball_radius*2,&board[i]);
+        Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-Ball_radius*2,&board[i]);
     }
 }
 
@@ -771,4 +744,47 @@ bool IsGameOver(){
     }else{
         return 0;
     }
+}
+
+void LimitBoard(Board *board){
+    if(board->x<=0){
+        board->x=0;
+        board->dx=0;
+    }
+    if(board->x+board->w>=Window_Width){
+        board->x=Window_Width-board->w;
+        board->dx=0;
+    }
+    if(board->y<=Window_Depth-Block*3){
+        board->y=Window_Depth-Block*3;
+        board->dy=0;
+    }
+    if(board->y+board->h>=Window_Depth){
+        board->y=Window_Depth-board->h;
+        board->dy=0;
+    }
+}
+
+void Server_Quit(){
+    close(socket_listen);
+    for(int i=0;i<PlayNum;i++){
+        close(Player_socket[i]);
+    }
+}
+
+void BallNumChange(Message *MSG){
+    for(int i=0;i<PlayNum;i++){
+        if(board[i].HaveNewBallCreated){
+            MSG->ballMessage[i][0].HaveNewBallCreated=true;
+        }else{
+            MSG->ballMessage[i][0].HaveNewBallCreated=false;
+        }
+        if(board[i].HaveNewBallDeleted){
+            MSG->ballMessage[i][0].HaveNewBallDeleted=true;
+        }else{
+            MSG->ballMessage[i][0].HaveNewBallDeleted=false;
+        }
+        board[i].HaveNewBallCreated=false;
+        board[i].HaveNewBallDeleted=false;
+    }    
 }

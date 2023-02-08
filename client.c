@@ -22,6 +22,7 @@
 #define MaxHp 4
 #define FPS 30
 #define QuitGame 8
+#define Shitf 9
 #undef main
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
@@ -58,7 +59,6 @@ typedef struct Board{
     enum Element element;
     Ball *HeadNode;
     int BallNum;
-    int CountPower_Bullet;
     int CountPower_NewBall;
     int dx;
     int dy;
@@ -68,37 +68,42 @@ typedef struct Board{
     int h;
     int NO;//
     bool HaveNewBallCreated;
+    bool HaveNewBallDeleted;
 }Board;
 typedef struct Location{
     int x;
     int y;
 }Location;
 
-typedef struct Bullet{
-    int x;
-    int y;
-    int dy;
-    int BulletLength;
-    int BulletDistance;
-    int BulletNum;
-    int status;
-}Bullet;// Bullet[0]作为计数的Bullet
 typedef struct BallMessage{
     int x;
     int y;
     int dx;
     int dy;
+    bool HaveNewBallCreated;
+    bool HaveNewBallDeleted;
 }BallMessage;
 typedef struct Message{
     Brick map[Row+2][Col+2];
     Board board[2];
     BallMessage ballMessage[2][4];
+    bool HaveNewBallCreated;
+    bool HaveNewBallDeleted;
 }Message;
 
-
+typedef struct MessageFromClient{
+    bool IsUP;
+    bool IsDown;
+    bool IsLeft;
+    bool IsRight;
+    bool IsQuitGame;
+    int  ChangeColor;
+    bool IsShift;
+    bool IsLaunchBall;
+}MessageFromClient;
 
 Board board[2];
-Bullet BulletPack[2][100];
+/*Bullet BulletPack[2][100];*/
 Brick map[Row+2][Col+2];
 SDL_Window *Window=NULL;
 SDL_Renderer *Renderer=NULL;
@@ -136,11 +141,12 @@ void Load();
 void AnalyseMSG_Board(Message *MSG);
 void AnalyseMSG_Ball(Message *MSG);
 void AnalyseMSG_Map(Message *MSG);
+void AnalyseMSG_BallOperation(Message *MSG);
 void HitWall(Board *board,Ball *ball,int NO);
 int SendMSG(void *data);
 int  dist(int x1,int y1,int x2,int y2);
 void ElementalAttack(Ball *ball,Location location);
-void DeleteBullet();
+/*void DeleteBullet();*/
 void DestroyBrick();
 void Initgame();
 void InitBall();
@@ -214,6 +220,21 @@ void BuildConnection(int argc,char *argv[]){
     //建立好连接之后，就可以释放了
     freeaddrinfo(result);
     // 已经建立好连接了，现在开始接受信息
+    int NO;
+    if(recv(client_socket,&NO,sizeof(int),0)>=0){
+        printf("You are Player%d\n",NO);
+    }
+    Message MSG;
+    if(recv(client_socket,&MSG,sizeof(Message),0)>=0){
+        printf("recv InitMsg succeed\n");
+    }
+    AnalyseMSG_BallOperation(&MSG);
+    AnalyseMSG_Map(&MSG);
+    printf("enter1\n");
+    AnalyseMSG_Board(&MSG);
+    printf("enter2\n");
+    AnalyseMSG_Ball(&MSG);
+    printf("enter3\n");
     return;
 }
 void InitAll(){
@@ -259,7 +280,7 @@ int Update(void *data){
         SDL_RenderClear(Renderer);
         DrawMap();
         DrawBall();
-        DrawBoard();                       
+        DrawBoard();                  
         if(GetPower_Wall){
             DrawWall();
         }   
@@ -306,6 +327,7 @@ void DrawBoard(){
 
 int MoveBoard(void *data){
         SDL_Event event;
+        if(PlayNum==1){
         while(1){
             int first=clock();
             int times;
@@ -348,10 +370,12 @@ int MoveBoard(void *data){
                 }
             } 
         }
+        SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+        }
         if(PlayNum==2){
             SendMSG(NULL);
         }
-     SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+     
         }
         
     }
@@ -402,7 +426,7 @@ Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board){//用链表结构
     newBall->dx=0;
     newBall->dy=0;// 还没决定好
     newBall->radius=Ball_radius;
-    newBall->element=normal;
+    newBall->element=board->element;
     //次序不重要，直接用头插法就行了
     Ball *tmp=board->HeadNode->next;
     board->HeadNode->next=newBall;
@@ -446,7 +470,7 @@ void beginTimer(){
         SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
     }
     if(PlayNum==2){
-       /*SDL_CreateThread(SendMSG,"SendMSG",(void*)NULL);*/
+        SDL_CreateThread(SendMSG,"SendMSG",(void*)NULL);
         SDL_CreateThread(AnalyseMSG,"AnalyseMSG",(void*)NULL);
     }
 }
@@ -607,7 +631,7 @@ void HitBoard(Board *board,Ball *ball,int NO){
             ball->element=board[NO].element;
             board[NO].CountPower_NewBall++;
             if(board[NO].CountPower_NewBall>=4&&board[NO].BallNum<=3){
-                CreatBall(board[NO].HeadNode,board[NO].x+board[NO].w/2,board[NO].y-ball->radius*2,&board[NO]);
+                CreatBall(board[NO].HeadNode,board[NO].x+board[NO].w/2,board[NO].y-Ball_radius*2,&board[NO]);
                 board[NO].HaveNewBallCreated=true;
                 board[NO].CountPower_NewBall=0;
             }
@@ -621,13 +645,13 @@ Uint32 VanishPower_Wall(Uint32 interval,void *param){
     return interval;
 }
 
-Uint32 VanishPower_Bullet(Uint32 interval,void *param){
+/*Uint32 VanishPower_Bullet(Uint32 interval,void *param){
     GetPower_Bullet=false;
-    DeleteBullet(); 
+    //DeleteBullet(); 
     SDL_RemoveTimer(Power_ID[2]);
     SDL_RemoveTimer(Power_ID[3]);
     return interval;
-}
+}*/
 
 void ChooseMod(){
     SDL_RenderClear(Renderer);
@@ -656,7 +680,7 @@ void ChooseMod(){
     }
 }
 
-Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param){
+/*Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param){
     // Creat
     int NewNO[2];
     for(int i=0;i<PlayNum;i++){
@@ -693,7 +717,7 @@ Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param){
             }
         }
     }
-}
+}*/
 
 bool IsGameOver(){
     if(BrickLeft<=0){
@@ -714,13 +738,13 @@ void Initgame(){
     InitGameObject();
 }
 
-void DeleteBullet(){
+/*void DeleteBullet(){
     for(int i=0;i<PlayNum;i++){
         for(int j=0;j<BulletPack[i][0].BulletNum;j++){
             BulletPack[i][j].status=0;
         }
     }
-}
+}*/
 
 void Quit(){
     for(int i=0;i<5;i++){
@@ -755,17 +779,20 @@ void InitBoard(){
         board[i].HeadNode->next=NULL;
         board[i].BallNum=0;
         board[i].CountPower_NewBall=0;
-        board[i].CountPower_Bullet=0;
         CountPower_Wall=0;
         board[i].y=Board_start_y;
         board[i].HaveNewBallCreated=false;
+        if(PlayNum==1){
+            board[0].x=Board_start_x+Block*3;
+        }else{
+            board[i].x=Block*i*4+Block*4;
+        }
     }
 }
 
 void InitBall(){
     for(int i=0;i<PlayNum;i++){
         Ball *NewBall=CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-Ball_radius*2,&board[i]);
-        printf("ball:x=%d\n",board[i].HeadNode->next->x);
     }
 }
 
@@ -838,12 +865,11 @@ int AnalyseMSG(void *data){
     while(1){
         Message MSG;
         int first=clock();
-        if(recv(client_socket,&MSG,sizeof(Message),MSG_DONTWAIT)>=0){
+        if(recv(client_socket,&MSG,sizeof(Message),0)>=0){
+            AnalyseMSG_BallOperation(&MSG);
             AnalyseMSG_Board(&MSG);
             AnalyseMSG_Ball(&MSG);
-            printf("enter2\n");
             AnalyseMSG_Map(&MSG);
-            printf("enter3\n");
         }
         SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
     }
@@ -904,33 +930,68 @@ void AdjustBoardLocation(int operation,Board *board,int times){
 }
 
 int SendMSG(void *data){
-    int MSG;
+    MessageFromClient tmp;
+    MessageFromClient *MSG=&tmp;
     SDL_Event event;
     while(1){
         int first=clock();
-        if(KeyValue[SDL_SCANCODE_W]){
-            MSG=UP;
-        }else if(KeyValue[SDL_SCANCODE_S]){
-            MSG=DOWN;
-        }else if(KeyValue[SDL_SCANCODE_A]){
-            MSG=LEFT;
-        }else if(KeyValue[SDL_SCANCODE_D]){
-            MSG=RIGHT;
-        }
-        while(SDL_PollEvent(&event)){
-            if(event.type==SDL_QUIT){
-                MSG=QuitGame;
+        int HaveMSGSend=false;
+        int tmpcolor=MSG->ChangeColor;
+        memset(MSG,0,sizeof(MessageFromClient));
+        MSG->ChangeColor=tmpcolor;// 每一次都要清空缓冲区
+        if((KeyValue[SDL_SCANCODE_W]||KeyValue[SDL_SCANCODE_S]||KeyValue[SDL_SCANCODE_A]||KeyValue[SDL_SCANCODE_D]||KeyValue[SDL_SCANCODE_Q]||KeyValue[SDL_SCANCODE_E]||KeyValue[SDL_SCANCODE_C]||KeyValue[SDL_SCANCODE_V]||KeyValue[SDL_SCANCODE_R]||KeyValue[SDL_SCANCODE_LSHIFT]||KeyValue[SDL_SCANCODE_ESCAPE]||KeyValue[SDL_SCANCODE_H])){
+            HaveMSGSend=true;
+            if(KeyValue[SDL_SCANCODE_W]){
+            MSG->IsUP=true;
+            }if(KeyValue[SDL_SCANCODE_S]){
+            MSG->IsDown=true;
+            }if(KeyValue[SDL_SCANCODE_A]){
+            MSG->IsLeft=true;
+            }if(KeyValue[SDL_SCANCODE_D]){
+            MSG->IsRight=true;
+            }if(KeyValue[SDL_SCANCODE_Q]){
+            MSG->ChangeColor=fire;
+            }if(KeyValue[SDL_SCANCODE_E]){
+            MSG->ChangeColor=water;
+            }if(KeyValue[SDL_SCANCODE_C]){
+            MSG->ChangeColor=thunder;
+            }if(KeyValue[SDL_SCANCODE_V]){
+            MSG->ChangeColor=ice;
+            }if(KeyValue[SDL_SCANCODE_R]){
+            MSG->ChangeColor=normal;
+            }if(KeyValue[SDL_SCANCODE_ESCAPE]){
+            MSG->IsQuitGame=true;
+            }if(KeyValue[SDL_SCANCODE_LSHIFT]){
+            MSG->IsShift=true;
+            }if(KeyValue[SDL_SCANCODE_H]){
+                printf("i click the H\n");
+            MSG->IsLaunchBall=true;
             }
         }
-        int sendbytes=send(client_socket,&MSG,sizeof (int) ,MSG_DONTWAIT);
+            
+        while(SDL_PollEvent(&event)){
+                if(event.type==SDL_QUIT){
+                    HaveMSGSend=true;
+                    MSG->IsQuitGame=QuitGame;
+            }
+        }
+        if(HaveMSGSend){
+            int sendbytes=send(client_socket,MSG,sizeof (MessageFromClient) ,MSG_DONTWAIT);
         if(sendbytes==-1){
             printf("send msg to server failed\n");
         }else if(sendbytes==0){
             printf("disconnected\n");
         }
-        SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
-    } 
-}              
+        }
+        int interval;
+        if((interval=FPS-(clock()-first)/CLOCKS_PER_SEC*1000)>0){
+            SDL_Delay(interval);
+        }
+        
+}   
+}
+
+    
 
 // 自己思考问题时候，“次序感“还是太若了，就比如adjustloacation，这种判断应该先是预测会不会超过，如果会，补齐，而不是超过了在退回
 
@@ -980,23 +1041,15 @@ void HitWall(Board *board,Ball *ball,int NO){
 
 void AnalyseMSG_Board(Message *MSG){
     for(int i=0;i<PlayNum;i++){
+        Ball *tmp=board[i].HeadNode;
         board[i]=MSG->board[i];
+        board[i].HeadNode=tmp;
     }
 }
 
 void AnalyseMSG_Ball(Message *MSG){
     for(int i=0;i<PlayNum;i++){
-        if(MSG->board[i].HaveNewBallCreated==true){
-            CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-Ball_radius*2,&board[i]);
-        }
-    }
-    for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
-        if(tmp==NULL){
-            printf("yes\n");
-        }else{
-            printf("wrong\n");
-        }
         for(int j=0;j<MSG->board[i].BallNum;j++){
             tmp->dx=MSG->ballMessage[i][j].dx;
             tmp->dy=MSG->ballMessage[i][j].dy;
@@ -1013,4 +1066,24 @@ void AnalyseMSG_Map(Message *MSG){
             map[i][j]=MSG->map[i][j];
         }
    }
+}
+
+void AnalyseMSG_BallOperation(Message *MSG){
+    for(int i=0;i<PlayNum;i++){
+        if(MSG->ballMessage[i][0].HaveNewBallCreated==true){
+            CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-Ball_radius*2,&board[i]);
+            printf("creat ball succeed\n");
+        }
+        /*Ball *tmp=board[i].HeadNode->next;
+        while(tmp!=NULL){
+            printf("")
+        }*/
+        if(MSG->ballMessage[i][0].HaveNewBallDeleted==true){
+            printf("wrong delete\n");
+            Ball *tmp=board[i].HeadNode->next->next;
+            free(board[i].HeadNode->next);
+            board[i].HeadNode->next=tmp;
+            board[i].BallNum-=1;
+        }
+}
 }
