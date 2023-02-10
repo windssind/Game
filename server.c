@@ -23,7 +23,7 @@
 #define QuitGame 8
 #define Shift 9
 #define MaxHp 4
-#define FPS 30
+#define FPS 25
 #undef main
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
@@ -94,6 +94,9 @@ typedef struct Message{
     BallMessage ballMessage[2][4];
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
+    /*bool IsNextLevel;
+    bool IsWin;
+    bool IsLose;*/
 }Message;
 typedef struct MessageFromClient{
     bool IsUP;
@@ -130,6 +133,11 @@ void InitGameObject();
 void LimitBoard(Board *board);
 void Server_Quit();
 void BallNumChange(Message *MSG);
+/*bool IsVictory();
+bool NextLevel();
+bool IsLose();
+void WaitForResponse_Win();
+void WaitForResponse_Lose();*/
 Brick map[Row+2][Col+2];
 Board board[PlayNum];
 int level=1;
@@ -157,10 +165,12 @@ Uint32 VanishPower_Wall(Uint32 interval,void *param);
 Uint32 VanishPower_Bullet(Uint32 interval,void *param);
 Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
+/*void NextLevel();
+void Lose();
+void Win();*/
 void HitBrick(Board *board,Ball *ball,int NO);
 void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
-bool IsGameOver();
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board);
 void HitBoard(Board *board,Ball *ball,int NO);
 /*Uint32 AnalyseMSG(Uint32 interval,void *param);*/
@@ -173,8 +183,9 @@ int main(){
     InitGameObject();
     WaitForConnection();
     CreatThread();
-    while(!IsGameOver());
-    close(socket_listen);
+    while(1){
+       Thread_send(NULL);
+    }
 }
 void WaitForConnection(){
     struct addrinfo *result,hints;
@@ -242,7 +253,6 @@ void WaitForConnection(){
 
 void CreatThread(){
     SDL_CreateThread(Thread_listen,"Thread_listen",(void*)NULL);
-    SDL_CreateThread(Thread_send,"Thread_send",(void*)NULL);
     SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);
         
 }
@@ -280,6 +290,7 @@ int Thread_listen(void *data){
 }
 
  void AnalyseMSG(int NO,MessageFromClient *instruction){
+    printf("NO=%d\n",NO);
     int times=(instruction->IsShift==true?2:1);
     if(instruction->IsUP){
         AdjustBoardLocation(UP,&board[NO],times);
@@ -295,8 +306,10 @@ int Thread_listen(void *data){
         printf("launch board ready\n");
         Launch(&board[NO]);
     }
-    board[NO].element=instruction->ChangeColor;
- }
+    if(board[NO].element>=0&&board[NO].element<=4){
+        board[NO].element=instruction->ChangeColor;
+    }
+}
 
  void RecvMSG(int NO,MessageFromClient *MSG){
         int recvbytes=recv(Player_socket[NO],MSG,sizeof(MessageFromClient),0);
@@ -312,19 +325,23 @@ int Thread_listen(void *data){
 
 
  int Thread_send(void *data){
-    while(1){
         int first=clock();
         Message MSG;
         BallNumChange(&MSG);
         CopyMap(&MSG);
         CopyBoard(&MSG);
         CopyBall(&MSG);
+        /*MSG.IsNextLevel=(NextLevel()?true:false);
+        MSG.IsWin=((NextLevel()&&IsWin())?true:false);
+        MSG.IsLose=(IsLose()?true:false);
+        if(MSG.IsWin) WaitForResponse_Win();
+        if(MSG.IsLose) WaitForResponse_Lose();*/
         for(int i=0;i<PlayNum;i++){
             SendMSG(i,&MSG);
         }
-        SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+        memset(&MSG,0,sizeof(Message));
+        SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
     }
-}
 
  void SendMSG(int NO,Message *MSG){
     int sendbytes=send(Player_socket[NO],MSG,sizeof(Message),MSG_DONTWAIT);
@@ -333,8 +350,6 @@ int Thread_listen(void *data){
         for(int i=0;i<PlayNum;i++){
             close(Player_socket[i]);
         }
-    }else if(sendbytes==-1){
-        fprintf(stderr,"send to Player%d fail\n",NO+1);
     }
  }
 
@@ -411,7 +426,7 @@ while(1){
         }
         GetPower();
     }
-    SDL_Delay(FPS-(clock()-first)/CLOCKS_PER_SEC*1000);
+    SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
     }
 }
 void GetPower(){
@@ -617,34 +632,39 @@ void Launch(Board *board){
     }
 }
 
-void AdjustBoardLocation(int operation,Board *board,int times){
+void AdjustBoardLocation(int operation,Board *board_control,int times){
+    int The_Other;
+    The_Other=(board_control==&board[0]?1:0);
     if(operation==RIGHT){
-        if(board->x+board->w<=board[1].x&&board->x+Board_Vx*times+board->w>=board[1].x&&((board->y+board->h>board[1].y&&board->y<=board[1].y)||board->y>=board[1].y&&board->y<board[1].y+board[1].h)){
-            board->x=board[1].x-board->w;
+        board_control->dx=Board_Vx*times;
+        if(board_control->x+board_control->w<=board[The_Other].x&&board_control->x+Board_Vx*times+board_control->w>=board_control[The_Other].x&&((board_control->y+board_control->h>board[The_Other].y&&board_control->y<=board[The_Other].y)||board_control->y>=board[The_Other].y&&board_control->y<board[The_Other].y+board[The_Other].h)){
+            board_control->x=board[The_Other].x-board_control->w;
         }else{
-            board->x+=Board_Vx*times;
+            board_control->x+=board_control->dx;
         }
     }else if(operation==LEFT){
-        if(board->x>=board[1].x+board[1].w&&board->x-Board_Vx*times<=board[1].x+board->w&&((board->y+board->h>board[1].y&&board->y<=board[1].y)||board->y>=board[1].y&&board->y<board[1].y+board[1].h)){
-            board->x=board[1].x+board[1].w;
+        board_control->dx=-Board_Vx*times;
+        if(board_control->x>=board[The_Other].x+board[The_Other].w&&board_control->x-Board_Vx*times<=board[The_Other].x+board_control->w&&((board_control->y+board_control->h>board[The_Other].y&&board_control->y<=board[The_Other].y)||board_control->y>=board[The_Other].y&&board_control->y<board[The_Other].y+board[The_Other].h)){
+            board_control->x=board[The_Other].x+board[The_Other].w;
         }else{
-            board->x-=Board_Vx*times;
+            board_control->x+=board_control->dx;
         }
     }else if(operation==DOWN){
-        printf("down enter\n");
-        if(board->y<=board[1].y&&board->y+board->h+Board_Vy*times>=board[1].y&&((board->x+board->w>board[1].x&&board->x<=board[1].x)||board->x>=board[1].x&&board->x<board[1].x+board[1].w)){
-            board->y=board[1].y-board->h;
+        board_control->dy=Board_Vy*times;
+        if(board_control->y<=board[The_Other].y&&board_control->y+board_control->h+Board_Vy*times>=board[The_Other].y&&((board_control->x+board_control->w>board[The_Other].x&&board_control->x<=board[The_Other].x)||board_control->x>=board[The_Other].x&&board_control->x<board[The_Other].x+board[The_Other].w)){
+            board_control->y=board[The_Other].y-board_control->h;
         }else{
-            board->y+=Board_Vy*times;
+            board_control->y+=board_control->dy;
         }
     }else if(operation==UP){
-        if(board->y>=board[1].y&&board->y-Board_Vy*times<=board[1].y+board[1].h&&((board->x+board->w>board[1].x&&board->x<=board[1].x)||board->x>=board[1].x&&board->x<board[1].x+board[1].w)){
-            board->y=board[1].y+board->h;
+        board_control->dy=-Board_Vy*times;
+        if(board_control->y>=board[The_Other].y&&board_control->y-Board_Vy*times<=board[The_Other].y+board[The_Other].h&&((board_control->x+board_control->w>board[The_Other].x&&board_control->x<=board[The_Other].x)||board_control->x>=board[The_Other].x&&board_control->x<board[The_Other].x+board[The_Other].w)){
+            board_control->y=board[The_Other].y+board_control->h;
         }else{
-            board->y-=Board_Vy*times;
+            board_control->y+=board_control->dy;
         }
     }
-    LimitBoard(board);
+    LimitBoard(board_control);
 }
 
 void InitMap_2(){
@@ -668,7 +688,6 @@ void HitWall(Board *board,Ball *ball,int NO){
                     tmp->dy=-tmp->dy;
                 }else{// 没有墙壁
                     if(board[NO].BallNum==1){// 
-                    printf("x=board[%d]=%d\n",NO,board[NO].x);
                         board[NO].HeadNode->next->dx=0;
                         board[NO].HeadNode->next->dy=0;
                         board[NO].HeadNode->next->element=board[NO].element;
@@ -731,21 +750,6 @@ void InitMap_1(){
     }
 }
 
-bool IsGameOver(){
-    if(BrickLeft<=0){
-        if(level=5){
-            //Win();
-            return 1;
-        }else{
-            level++;
-            Initgame();
-            return 0;
-        }
-    }else{
-        return 0;
-    }
-}
-
 void LimitBoard(Board *board){
     if(board->x<=0){
         board->x=0;
@@ -788,3 +792,27 @@ void BallNumChange(Message *MSG){
         board[i].HaveNewBallDeleted=false;
     }    
 }
+
+/*void NextLevel(){
+    if(level<5){
+        level++;
+        ReInitGameobject(level);
+    }else{
+        Win();
+    }
+}*/
+
+/*void ReInitGameobject(int level){
+    for(int i=0;i<PlayNum;i++){
+        while(board[i].HeadNode->next!=NULL){
+            DeleteBall(board[i].HeadNode,board[i].HeadNode->next,&board[i]);
+        }
+    }
+    InitMap(level);
+    InitBoard();
+    InitBall();
+}
+
+void WaitForResponse_Win(){
+    
+}*/

@@ -1,6 +1,8 @@
 #include<stdio.h>
+void heel(){
+    printf("%d\n",brick);
+}
 int main(){
-    int *tmp;
-    *tmp=5;
-    printf("%d\n",*tmp);
+    static int brick=5;
+    heel();
 }
