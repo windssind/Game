@@ -314,10 +314,10 @@ void InitMap(int level){
 
 int Update(void *data){
         SDL_RenderClear(Renderer);
-        Draw(PlayBackgroundSurface,0,0,Block*18,Block*15);
+        //Draw(PlayBackgroundSurface,0,0,Block*18,Block*15);
         DrawMap();
         //printf("redrawmap\n");
-        DrawBall();
+        //DrawBall();
         //printf("redrawball\n");
         DrawBoard();  
         //printf("redrawboard\n");            
@@ -514,16 +514,15 @@ void Load(){
     char BallImageName[30];
     char BoardImageName[30];
     for(int i=0;i<5;i++){
-        sprintf(BrickImageName,"tmp_image/Brick%d.png",i+1);
+        sprintf(BrickImageName,"Image/Brick%d.jpg",i+1);
         BrickSurface[i]=IMG_Load(BrickImageName);
-        sprintf(BallImageName,"tmp_image/Ball%d.png",i+1);
+        sprintf(BallImageName,"Image/Ball%d.jpg",i+1);
         BallSurface[i]=IMG_Load(BallImageName);
         sprintf(BoardImageName,"Image/Board%d.png",i+1);
         BoardSurface[i]=IMG_Load(BoardImageName);
         memset(BrickImageName,0,sizeof BrickImageName);
         memset(BallImageName,0,sizeof BallImageName);
         memset(BoardImageName,0,sizeof BoardImageName);
-        printf("%s\n",SDL_GetError());
     }
     PlayBackgroundSurface=IMG_Load("Image/PlayBackground.jpg");
     PlayBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,PlayBackgroundSurface);
@@ -855,7 +854,7 @@ void Pause(){
 void InitMap_2(){
     for(int i=0;i<Row+2;i++){
         for(int j=0;j<Col+2;j++){
-            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==8))||(i==7&&(j==5||j==6||j==7))){
+            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==9))||(i==7&&(j==5||j==6||j==7||j==8))){
                 map[i][j].element=rand()%5;
                 map[i][j].HP=4;
                 map[i][j].status=1;

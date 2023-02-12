@@ -558,8 +558,9 @@ void ElementalAttack(Ball *ball,Location location){
 void DestroyBrick(){
     for(int i=1;i<=Row;i++){
         for(int j=1;j<=Col;j++){
-            if(map[i][j].HP<=0){
+            if(map[i][j].status==1&&map[i][j].HP<=0){
                 map[i][j].status=0;
+                BrickLeft--;
             }
         }
     }
@@ -689,7 +690,7 @@ void AdjustBoardLocation(int operation,Board *board_control,int times){
 void InitMap_2(){
     for(int i=0;i<Row+2;i++){
         for(int j=0;j<Col+2;j++){
-            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==8))||(i==7&&(j==5||j==6||j==7))){
+            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==9))||(i==7&&(j==5||j==6||j==7||j==8))){
                 map[i][j].element=rand()%5;
                 map[i][j].HP=MaxHp;
                 map[i][j].status=1;
