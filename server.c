@@ -94,9 +94,9 @@ typedef struct Message{
     BallMessage ballMessage[2][4];
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
-    /*bool IsNextLevel;
+    bool IsNextLevel;
     bool IsWin;
-    bool IsLose;*/
+    bool IsLose;
 }Message;
 typedef struct MessageFromClient{
     bool IsUP;
@@ -129,15 +129,20 @@ void HitWall(Board *board,Ball *ball,int NO);
 void InitBall();
 void InitBoard();
 void InitMap(int level);
+void ReInitGameobject(int level);
 void InitGameObject();
 void LimitBoard(Board *board);
 void Server_Quit();
 void BallNumChange(Message *MSG);
-/*bool IsVictory();
+bool IsVictory();
+bool NextLevel(time_t *BeginTime);
+bool IsLose(time_t *BeginTime);
+void Server_Win();
+void Server_Lose();
+void Server_NextLevel();
+bool IsVictory();
 bool NextLevel();
 bool IsLose();
-void WaitForResponse_Win();
-void WaitForResponse_Lose();*/
 Brick map[Row+2][Col+2];
 Board board[PlayNum];
 int level=1;
@@ -165,9 +170,6 @@ Uint32 VanishPower_Wall(Uint32 interval,void *param);
 Uint32 VanishPower_Bullet(Uint32 interval,void *param);
 Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
-/*void NextLevel();
-void Lose();
-void Win();*/
 void HitBrick(Board *board,Ball *ball,int NO);
 void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
@@ -182,9 +184,18 @@ const int Window_Depth=Block*15;
 int main(){
     InitGameObject();
     WaitForConnection();
-    CreatThread();
+    time_t BeginTime=time(NULL);
     while(1){
+        long int first=clock();
+        Thread_listen(NULL);
        Thread_send(NULL);
+        MoveBall(NULL);
+        if(NextLevel(&BeginTime))  Server_NextLevel();
+        else if(IsVictory()) Server_Win();
+        else if(IsLose(&BeginTime))  Server_Lose(NULL);
+        if((FPS-(clock()-first)*1000/CLOCKS_PER_SEC)>0){
+            SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
+        }
     }
 }
 void WaitForConnection(){
@@ -239,11 +250,14 @@ void WaitForConnection(){
         board[i].HaveNewBallDeleted=false;
     }
     Message MSG;
+    MSG.IsWin=false;
+    MSG.IsLose=false;
     BallNumChange(&MSG);
     CopyMap(&MSG);
     CopyBoard(&MSG);
     CopyBall(&MSG);
     for(int i=0;i<PlayNum;i++){
+        printf("MSG.iswin=%d\n",MSG.IsWin);
         SendMSG(i,&MSG);
     }
     printf("send MSG init win\n");
@@ -260,16 +274,15 @@ void CreatThread(){
 int Thread_listen(void *data){
     struct timeval interval;
     interval.tv_sec=0;
-    interval.tv_usec=30000;
+    interval.tv_usec=300;
     fd_set set;
     FD_ZERO(&set);
     for(int i=0;i<PlayNum;i++){
         FD_SET(Player_socket[i],&set);
     }
     MessageFromClient MSG;
-    while(1){
         fd_set readset=set;
-        if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,NULL)>0){
+        if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,&interval)>0){
             for(int i=0;i<PlayNum;i++){
                 if(FD_ISSET(Player_socket[i],&readset)){
                     RecvMSG(i,&MSG);
@@ -287,10 +300,9 @@ int Thread_listen(void *data){
             }// no message,speed equals zero
         }
     }
-}
 
  void AnalyseMSG(int NO,MessageFromClient *instruction){
-    printf("NO=%d\n",NO);
+    //printf("SERVER:recv msg from NO=%d\n",NO);
     int times=(instruction->IsShift==true?2:1);
     if(instruction->IsUP){
         AdjustBoardLocation(UP,&board[NO],times);
@@ -305,8 +317,12 @@ int Thread_listen(void *data){
     }if(instruction->IsLaunchBall){
         printf("launch board ready\n");
         Launch(&board[NO]);
+    }if((!instruction->IsUP)&&(!instruction->IsDown)){
+        board[NO].dy=0;
+    }if((!instruction->IsLeft)&&(!instruction->IsRight)){
+        board[NO].dx=0;
     }
-    if(board[NO].element>=0&&board[NO].element<=4){
+    if(instruction->ChangeColor>=0&&instruction->ChangeColor<=4){
         board[NO].element=instruction->ChangeColor;
     }
 }
@@ -325,12 +341,14 @@ int Thread_listen(void *data){
 
 
  int Thread_send(void *data){
-        int first=clock();
         Message MSG;
+        memset(&MSG,0,sizeof(Message));
         BallNumChange(&MSG);
         CopyMap(&MSG);
         CopyBoard(&MSG);
         CopyBall(&MSG);
+        MSG.IsWin=false;
+        MSG.IsLose=false;
         /*MSG.IsNextLevel=(NextLevel()?true:false);
         MSG.IsWin=((NextLevel()&&IsWin())?true:false);
         MSG.IsLose=(IsLose()?true:false);
@@ -339,8 +357,6 @@ int Thread_listen(void *data){
         for(int i=0;i<PlayNum;i++){
             SendMSG(i,&MSG);
         }
-        memset(&MSG,0,sizeof(Message));
-        SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
     }
 
  void SendMSG(int NO,Message *MSG){
@@ -392,9 +408,21 @@ void InitMap(int level){
     switch (level){
     case 1:
         InitMap_1();
+        printf("initmap1\n");
         break;
     case 2:
         InitMap_2();
+        printf("initmap1\n");
+        break;
+    case 3:
+        InitMap_3();
+        printf("initmap1\n");
+        break;
+    case 4:
+        InitMap_4();
+        break;
+    case 5:
+        InitMap_5();
         break;
     default:
         break;
@@ -406,8 +434,6 @@ void InitMap(int level){
 
 
 int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖块
-while(1){
-    int first=clock();
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
@@ -425,8 +451,6 @@ while(1){
             tmp=tmp->next;// 有bug，如果delete了，就会有问题
         }
         GetPower();
-    }
-    SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
     }
 }
 void GetPower(){
@@ -597,19 +621,21 @@ void HitBrick(Board *board,Ball *ball,int NO){
     }
 }
 void HitBoard(Board *board,Ball *ball,int NO){
-        if(ball->dy>0&&ball->x>=board[NO].x&&ball->x<=board[NO].x+board[NO].w&&ball->y+ball->radius>=board[NO].y-10&&ball->y+board[NO].HeadNode->next->radius<=board[NO].y+board[NO].h*2){
-            ball->dx=ball->dx+board[NO].dx/3;
-            ball->dy=-ball->dy+board[NO].dy/6;
-            ball->element=board[NO].element;
-            board[NO].CountPower_NewBall++;
-            if(board[NO].CountPower_NewBall>=4&&board[NO].BallNum<=3){
-                CreatBall(board[NO].HeadNode,board[NO].x+board[NO].w/2,board[NO].y-ball->radius*2,&board[NO]);
-                board[NO].HaveNewBallCreated=true;
-                board[NO].CountPower_NewBall=0;
+    for(int i=0;i<PlayNum;i++){
+        if(ball->dy>0&&ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y-10&&ball->y+board[i].HeadNode->next->radius<=board[i].y+board[i].h*2){
+            ball->dx=ball->dx+board[i].dx/3;
+            ball->dy=-ball->dy+board[i].dy/6;
+            ball->element=board[i].element;
+            board[i].CountPower_NewBall++;
+            if(board[i].CountPower_NewBall>=4&&board[i].BallNum<=3){
+                CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-ball->radius*2,&board[i]);
+                board[i].HaveNewBallCreated=true;
+                board[i].CountPower_NewBall=0;
             }else{
-                board[NO].HaveNewBallCreated=false;
+                board[i].HaveNewBallCreated=false;
             }
 
+    }
     }
 }
 
@@ -668,8 +694,19 @@ void AdjustBoardLocation(int operation,Board *board_control,int times){
 }
 
 void InitMap_2(){
-
-}
+    for(int i=0;i<Row+2;i++){
+        for(int j=0;j<Col+2;j++){
+            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==8))||(i==7&&(j==5||j==6||j==7))){
+                map[i][j].element=rand()%5;
+                map[i][j].HP=4;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else{
+                map[i][j].status=0;
+            }
+        }
+    }
+};
 
 Uint32 VanishPower_Wall(Uint32 interval,void *param){
     GetPower_Wall=false;
@@ -741,11 +778,15 @@ void InitMap_1(){
         for(int j=0;j<=Col+1;j++){
             if(i==0||i==Row+1||j==0||j==Col+1){
                 map[i][j].status=0;
-            }else{
+            }/*else{
                 map[i][j].HP=MaxHp;
                 map[i][j].element=rand()%5;
-                map[i][j].status=1;
+                map[i][j].status=rand()%2;
+                BrickLeft++;
+            }*/else{
+                map[i][j].status=0;
             }
+
         }
     }
 }
@@ -816,3 +857,88 @@ void BallNumChange(Message *MSG){
 void WaitForResponse_Win(){
     
 }*/
+bool NextLevel(time_t *BeginTime){
+    if(level<5&&BrickLeft<=0){
+        level++;
+        *BeginTime=time(NULL);
+        return 1;
+    }else{
+        return 0;
+    }
+}
+
+bool IsVictory(){
+    if(level>=6){
+        return 1;
+    }else{
+        return 0;
+    }
+}
+
+bool IsLose(time_t *BeginTime){
+    if(difftime(time(NULL),*BeginTime)>=120){
+        return true ;
+    }else {
+        return false;
+    }
+}
+
+void Server_Win(){
+    Message *MSG;
+    memset(&MSG,0,sizeof(Message));
+    MSG->IsWin=true;
+    for(int i=0;i<PlayNum;i++){
+        send(Player_socket[i],&MSG,sizeof(Message),0);
+    }
+    Server_Quit();
+}
+
+void Server_Lose(){
+    Message *MSG;
+    memset(&MSG,0,sizeof(Message));
+    MSG->IsLose==true;
+    for(int i=0;i<PlayNum;i++){
+        send(Player_socket[i],&MSG,sizeof(Message),0);
+    }
+    Server_Quit();
+}
+void InitMap_3(){
+    for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if(i==0||i==Row+1||j==0||j==Col+1){
+                map[i][j].status=0;
+            }else{
+                map[i][j].HP=MaxHp;
+                map[i][j].element=rand()%5;
+                map[i][j].status=1;
+                BrickLeft++;
+            }
+        }
+    }
+}
+
+void ReInitGameobject(int level){
+    for(int i=0;i<PlayNum;i++){
+        while(board[i].HeadNode->next!=NULL){
+            DeleteBall(board[i].HeadNode,board[i].HeadNode->next,&board[i]);
+        }
+        free(board[i].HeadNode);
+    }
+    BrickLeft=0;
+    InitMap(level);
+    InitBoard();
+    InitBall();
+}
+
+void InitMap_4(){
+
+}
+
+void InitMap_5(){
+
+}
+
+void Server_NextLevel(){
+    level++;
+    ReInitGameobject(level);
+}

@@ -27,6 +27,7 @@
 #include"SDL2/SDL.h"
 #include"SDL2/SDL_image.h"
 #include"SDL2/SDL_ttf.h"
+#include"SDL2/SDL_thread.h"
 #include<time.h>
 #include<math.h>
 #include <arpa/inet.h>
@@ -89,9 +90,11 @@ typedef struct Message{
     BallMessage ballMessage[2][4];
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
-    /*bool IsNextLevel;
+    bool IsNextLevel;
     bool IsWin;
-    bool IsLose;*/
+    bool IsLose;
+    bool Ready;
+    bool Disconnected;
 }Message;
 
 typedef struct MessageFromClient{
@@ -103,6 +106,7 @@ typedef struct MessageFromClient{
     int  ChangeColor;
     bool IsShift;
     bool IsLaunchBall;
+    bool Play;
 }MessageFromClient;
 
 Board board[2];
@@ -122,7 +126,6 @@ int CountPower_NewBall=0;
 int CountPower_Wall=0;
 int CountPower_Bullet=0;
 bool GetPower_Wall=false;
-bool GetPower_Bullet=false;
 void BuildConnection(int argc,char *argv[]);
 //void PaintFont(const char *text,int x,int y,int w,int h);
 void InitAll();
@@ -131,7 +134,6 @@ void DrawMap();
 void DrawBall();
 void DrawBoard();
 void DrawWall();
-void DrawBullet();
 void InitMap_1();
 void InitMap_2();
 void InitMap_3();
@@ -148,7 +150,7 @@ void AnalyseMSG_Map(Message *MSG);
 void AnalyseMSG_BallOperation(Message *MSG);
 void WaitForPlayer();
 void Client_Win();
-void Client_Lose();
+void Client_Lose(time_t *BeginTime);
 void HitWall(Board *board,Ball *ball,int NO);
 int SendMSG(void *data);
 int  dist(int x1,int y1,int x2,int y2);
@@ -161,8 +163,8 @@ void InitBoard();
 void GetPower();
 void Pause();
 bool IsVictory();
-bool NextLevel();
-bool IsLose();
+bool NextLevel(time_t *BeginTime);
+bool IsLose(time_t *BeginTime);
 void AdjustBoardLocation(int operation,Board *board,int times);
 void PrintFont(const char*text);
 Uint32 VanishPower_Wall(Uint32 interval,void *param);
@@ -186,8 +188,12 @@ SDL_Surface *BallSurface[5];
 SDL_Texture *BallTexture[5];
 SDL_Surface *BoardSurface[5];
 SDL_Texture *BoardTexture[5];
-SDL_Surface *MainBackgroundSurface;
-SDL_Texture *MainBackgroundTexture;
+SDL_Surface *PlayBackgroundSurface;
+SDL_Texture *PlayBackgroundTexture;
+SDL_Surface *WinBackgroundSurface;
+SDL_Texture *WinBackgroundTexture;
+SDL_Surface *LoseBackgroundSurface;
+SDL_Texture *LoseBackgroundTexture;
 SDL_Surface *WaitBackgroundSurface;
 SDL_Texture *WaitBackgroundTexture;
 SDL_Rect BackgroundRect;
@@ -203,14 +209,31 @@ int main(int argc,char *argv[]){
         BuildConnection(argc,argv);
         /*WaitForPlayer();*/
         
-    }beginTimer(&PlayNum);
+    }//beginTimer(&PlayNum);
+    long int BeginTime=time(NULL);int i=0;
     while(1){
         long int first=clock();
+        if(PlayNum==1){
+            MoveBall(NULL);
+            MoveBoard(NULL);
+        }
+        
         if(PlayNum==2){
             SendMSG(NULL);
+            for(int i=0;i<100;i++){
+                AnalyseMSG(NULL);
+            }
         }
         Update(NULL);
-        SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
+        //printf("client:update=%d\n",i);
+        if(PlayNum==1){
+            if(NextLevel(&BeginTime))  ReInitGameobject(level);
+            else if(IsVictory()) Client_Win();
+            else if(IsLose(&BeginTime))  Client_Lose(&BeginTime);
+        }
+        if((FPS-(clock()-first)*1000/CLOCKS_PER_SEC)>0){
+            SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
+        }
     }
     /*closeTimer();
     Quit();*/
@@ -240,21 +263,13 @@ void BuildConnection(int argc,char *argv[]){
     //建立好连接之后，就可以释放了
     freeaddrinfo(result);
     // 已经建立好连接了，现在开始接受信息
+    WaitForPlayer();
     int NO;
     if(recv(client_socket,&NO,sizeof(int),0)>=0){
         printf("You are Player%d\n",NO);
     }else{
         printf("recv fail\n");
     }
-    //WaitForPlayer();
-        Message MSG;
-    if(recv(client_socket,&MSG,sizeof(Message),0)>=0){
-        printf("recv InitMsg succeed\n");
-    }
-    AnalyseMSG_BallOperation(&MSG);
-    AnalyseMSG_Map(&MSG);
-    AnalyseMSG_Board(&MSG);
-    AnalyseMSG_Ball(&MSG);
     return;
 }
 void InitAll(){
@@ -288,6 +303,9 @@ void InitMap(int level){
     case 2:
         InitMap_2();
         break;
+    case 3:
+        InitMap_3();
+        break;
     default:
         break;
     }
@@ -296,9 +314,13 @@ void InitMap(int level){
 
 int Update(void *data){
         SDL_RenderClear(Renderer);
+        Draw(PlayBackgroundSurface,0,0,Block*18,Block*15);
         DrawMap();
+        //printf("redrawmap\n");
         DrawBall();
-        DrawBoard();                  
+        //printf("redrawball\n");
+        DrawBoard();  
+        //printf("redrawboard\n");            
         /*if(GetPower_Wall){
             DrawWall();
         }   */
@@ -344,8 +366,6 @@ void DrawBoard(){
 int MoveBoard(void *data){
         SDL_Event event;
         if(PlayNum==1){
-        while(1){
-            int first=clock();
             int times;
             if(KeyValue[SDL_SCANCODE_BACKSPACE]){
                 times=2;
@@ -386,8 +406,6 @@ int MoveBoard(void *data){
                 }
             } 
         }
-        SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
-        }
      
         }
         
@@ -397,8 +415,6 @@ int MoveBoard(void *data){
 
 
 int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖块
-while(1){
-    int first=clock();
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
@@ -416,21 +432,12 @@ while(1){
         }
         GetPower();
     }
-    /*if(NextLevel()){
-        ReInitGameobject();
-    }else if(IsVictory()){
-        Client_Win();
-    }else if(IsLose()){
-        CLient_Lose();
-    }*/
-    SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
-    }
 }
 void GetPower(){
-        if(CountPower_Wall>=10*PlayNum){// 长时间的
+        /*if(CountPower_Wall>=10*PlayNum){// 长时间的
         GetPower_Wall=true;
         Power_ID[1]=SDL_AddTimer(5000,VanishPower_Wall,NULL);
-        }
+        }*/
     }
     
     /*if(BrickLeft<=5&&GetPower_Bullet==false){//场上方块数量很少
@@ -455,9 +462,6 @@ Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board){//用链表结构
     return newBall;
 }
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
-    if(board->BallNum==1){
-        return ;
-    }else{
         Ball *tmp=HeadNode;
         while(tmp->next!=DesertedBall){
             tmp=tmp->next;
@@ -467,19 +471,21 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
         free(DesertedBall);
         board->BallNum--;
     }
-}
 
 void InitMap_1(){
     for(int i=0;i<=Row+1;i++){
         for(int j=0;j<=Col+1;j++){
             if(i==0||i==Row+1||j==0||j==Col+1){
                 map[i][j].status=0;
-            }else{
+            }/*else{
                 map[i][j].HP=MaxHp;
                 map[i][j].element=rand()%5;
-                map[i][j].status=1;
+                map[i][j].status=rand()%2;
                 BrickLeft++;
+            }*/else{
+                map[i][j].status=0;
             }
+
         }
     }
 }
@@ -508,24 +514,31 @@ void Load(){
     char BallImageName[30];
     char BoardImageName[30];
     for(int i=0;i<5;i++){
-        sprintf(BrickImageName,"Image/Brick%d.png",i+1);
+        sprintf(BrickImageName,"tmp_image/Brick%d.png",i+1);
         BrickSurface[i]=IMG_Load(BrickImageName);
-        sprintf(BallImageName,"Image/Ball%d.png",i+1);
+        sprintf(BallImageName,"tmp_image/Ball%d.png",i+1);
         BallSurface[i]=IMG_Load(BallImageName);
         sprintf(BoardImageName,"Image/Board%d.png",i+1);
         BoardSurface[i]=IMG_Load(BoardImageName);
         memset(BrickImageName,0,sizeof BrickImageName);
         memset(BallImageName,0,sizeof BallImageName);
         memset(BoardImageName,0,sizeof BoardImageName);
+        printf("%s\n",SDL_GetError());
     }
-    MainBackgroundSurface=IMG_Load("Image/MainBackground.jpeg");
-    MainBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,MainBackgroundSurface);
+    PlayBackgroundSurface=IMG_Load("Image/PlayBackground.jpg");
+    PlayBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,PlayBackgroundSurface);
+    WinBackgroundSurface=IMG_Load("Image/WinBackground.jpg");
+    WinBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,WinBackgroundSurface);
+    LoseBackgroundSurface=IMG_Load("Image/LoseBackground.jpg");
+    LoseBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,LoseBackgroundSurface);
+    WaitBackgroundSurface=IMG_Load("Image/WaitBackground.jpg");
+    WaitBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,WaitBackgroundSurface);
     BackgroundRect.h=Block*15;
     BackgroundRect.w=Block*18;
     BackgroundRect.x=0;
     BackgroundRect.y=0;
-    WaitBackgroundSurface=IMG_Load("Image/Board1.png");
-    WaitBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,MainBackgroundSurface);
+    /*WaitBackgroundSurface=IMG_Load("Image/Board1.png");
+    WaitBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,PlayBackgroundSurface);*/
 }
 
 
@@ -640,8 +653,9 @@ void ElementalAttack(Ball *ball,Location location){
 void DestroyBrick(){
     for(int i=1;i<=Row;i++){
         for(int j=1;j<=Col;j++){
-            if(map[i][j].HP<=0){
+            if(map[i][j].status==1&&map[i][j].HP<=0){
                 map[i][j].status=0;
+                BrickLeft--;
             }
         }
     }
@@ -678,10 +692,11 @@ Uint32 VanishPower_Wall(Uint32 interval,void *param){
 
 void ChooseMod(){
     SDL_RenderClear(Renderer);
-    SDL_RenderCopy(Renderer,MainBackgroundTexture,NULL,&BackgroundRect);
+    SDL_RenderCopy(Renderer,PlayBackgroundTexture,NULL,&BackgroundRect);
     SDL_RenderPresent(Renderer);
     SDL_Event event;
-    while(SDL_WaitEvent(&event)){
+    while(1){
+        while(SDL_WaitEvent(&event)){
         switch(event.type){
             case SDL_KEYDOWN:
                 switch (event.key.keysym.sym){
@@ -701,6 +716,8 @@ void ChooseMod(){
                 break;
         }
     }
+    }
+    
 }
 
 /*Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param){
@@ -742,21 +759,6 @@ void ChooseMod(){
     }
 }*/
 
-bool IsGameOver(){
-    if(BrickLeft<=0){
-        if(level=5){
-            //Win();
-            return 1;
-        }else{
-            level++;
-            Initgame();
-            return 0;
-        }
-    }else{
-        return 0;
-    }
-}
-
 void Initgame(){
     InitGameObject();
 }
@@ -779,7 +781,7 @@ void Quit(){
         SDL_FreeSurface(BallSurface[i]);
         SDL_FreeSurface(BrickSurface[i]);
     }
-    SDL_DestroyTexture(MainBackgroundTexture);
+    SDL_DestroyTexture(PlayBackgroundTexture);
     SDL_DestroyRenderer(Renderer);
     SDL_DestroyWindow(Window);
     SDL_Quit();
@@ -851,7 +853,18 @@ void Pause(){
 }*/
 
 void InitMap_2(){
-
+    for(int i=0;i<Row+2;i++){
+        for(int j=0;j<Col+2;j++){
+            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==8))||(i==7&&(j==5||j==6||j==7))){
+                map[i][j].element=rand()%5;
+                map[i][j].HP=4;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else{
+                map[i][j].status=0;
+            }
+        }
+    }
 };
 
 void DrawWall(){
@@ -885,17 +898,18 @@ void Launch(Board *board){
 // 碰撞的时候巧妙利用视觉残留，不用过于精准
 
 int AnalyseMSG(void *data){
-    while(1){
         Message MSG;
-        int first=clock();
+        memset(&MSG,0,sizeof(Message));
         if(recv(client_socket,&MSG,sizeof(Message),MSG_DONTWAIT)>=0){
+            // is win?
+            if(MSG.IsWin==true) Client_Win();
+            else if(MSG.IsLose==true) Client_Lose(NULL);
             AnalyseMSG_BallOperation(&MSG);
             AnalyseMSG_Board(&MSG);
             AnalyseMSG_Ball(&MSG);
             AnalyseMSG_Map(&MSG);
+            //printf("board[0].x=%d board[1].x=%d\n",board[0].x,board[1].x);
         }
-        SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
-    }
 }
 
 // 小心这个错误，两个程序中的内存位置是不一样的
@@ -957,6 +971,8 @@ void AdjustBoardLocation(int operation,Board *board,int times){
 }
 
 int SendMSG(void *data){
+    static int i=0;
+    i++;
     MessageFromClient tmp;
     MessageFromClient *MSG=&tmp;
     SDL_Event event;
@@ -965,6 +981,7 @@ int SendMSG(void *data){
         memset(MSG,0,sizeof(MessageFromClient));
         if((KeyValue[SDL_SCANCODE_W]||KeyValue[SDL_SCANCODE_S]||KeyValue[SDL_SCANCODE_A]||KeyValue[SDL_SCANCODE_D]||KeyValue[SDL_SCANCODE_Q]||KeyValue[SDL_SCANCODE_E]||KeyValue[SDL_SCANCODE_C]||KeyValue[SDL_SCANCODE_V]||KeyValue[SDL_SCANCODE_R]||KeyValue[SDL_SCANCODE_LSHIFT]||KeyValue[SDL_SCANCODE_ESCAPE]||KeyValue[SDL_SCANCODE_H])){
             HaveMSGSend=true;
+            printf("you click the keyboard\n");
             if(KeyValue[SDL_SCANCODE_W]){
             MSG->IsUP=true;
             }if(KeyValue[SDL_SCANCODE_S]){
@@ -993,6 +1010,7 @@ int SendMSG(void *data){
         }
             
         while(SDL_PollEvent(&event)){
+            printf("pollevent=%d\n",i);
                 if(event.type==SDL_QUIT){
                     HaveMSGSend=true;
                     MSG->IsQuitGame=QuitGame;
@@ -1000,13 +1018,14 @@ int SendMSG(void *data){
         }
         if(HaveMSGSend){
             int sendbytes=send(client_socket,MSG,sizeof (MessageFromClient) ,MSG_DONTWAIT);
+            printf("client:send msg succeed\n");
         if(sendbytes==-1){
             printf("send msg to server failed\n");
         }else if(sendbytes==0){
             printf("disconnected\n");
         }
         }
-        int interval;
+        //int interval;
         /*if((interval=FPS-(clock()-first)*1000/CLOCKS_PER_SEC)>0){
             SDL_Delay(interval);
         }*/
@@ -1114,16 +1133,6 @@ void WaitForPlayer(){
     SDL_RenderClear(Renderer);
     SDL_RenderCopy(Renderer,WaitBackgroundTexture,NULL,&BackgroundRect);
     SDL_RenderPresent(Renderer);
-    SDL_Event event;
-    while(1){
-        while(SDL_PollEvent(&event)){
-            if(event.type==SDL_KEYDOWN){
-                if(event.key.keysym.sym==SDLK_RETURN){
-                    break;
-                }
-            }
-        }
-    }
 }
 
 void ReInitGameobject(int level){
@@ -1131,33 +1140,36 @@ void ReInitGameobject(int level){
         while(board[i].HeadNode->next!=NULL){
             DeleteBall(board[i].HeadNode,board[i].HeadNode->next,&board[i]);
         }
+        free(board[i].HeadNode);
     }
+    BrickLeft=0;
     InitMap(level);
     InitBoard();
     InitBall();
 }
 
 bool IsVictory(){
-    if(level>5){
+    if(level>=6){
         return 1;
     }else{
         return 0;
     }
 }
 
-bool NextLevel(){
+bool NextLevel(time_t *BeginTime){
     if(level<5&&BrickLeft<=0){
         level++;
+        *BeginTime=time(NULL);
         return 1;
     }else{
         return 0;
     }
 }
 
-/*void Client_Win(){
+void Client_Win(){
         //delete thread
         SDL_RenderClear(Renderer);
-        SDL_RenderCopy(Renderer,WinBackgroundTexture);
+        SDL_RenderCopy(Renderer,WinBackgroundTexture,NULL,&BackgroundRect);
         SDL_RenderPresent(Renderer);
         SDL_Event event;
         while(1){
@@ -1171,11 +1183,12 @@ bool NextLevel(){
                 }
             }
         }
-}*/
+        }
 
-/*void Client_Lose(){
-    if(PlayNum==1){
-        //delete thread
+void Client_Lose(time_t *BeginTime){
+        SDL_RenderClear(Renderer);
+        SDL_RenderCopy(Renderer,LoseBackgroundTexture,NULL,&BackgroundRect);
+        SDL_RenderPresent(Renderer);
         SDL_Event event;
         while(1){
             if(SDL_PollEvent(&event)){
@@ -1185,8 +1198,7 @@ bool NextLevel(){
                             Quit();
                             break;
                         case SDLK_RETURN:
-                            ReInitGameobject(1);
-                            beginTimer();
+                            return ;
                             break;
                         default:
                             break;
@@ -1195,27 +1207,28 @@ bool NextLevel(){
                     Quit();
                 }
             }
-        }
-    }else if(PlayNum==2){
-        SDL_Event event;
-        while(1){
-            if(SDL_PollEvent(&event)){
-                if(event.type==SDL_KEYDOWN){
-                    switch(event.key.keysym.sym){
-                        case SDLK_ESCAPE:
-                            Quit();
-                            break;
-                        case SDLK_RETURN:
-                            ReInitGameobject(1);
-                            beginTimer();
-                            break;
-                        default:
-                            break;
-                    }
-                }else if(event.type==SDL_QUIT){
-                    Quit();
-                }
+    }
+}
+
+bool IsLose(time_t *BeginTime){
+    if(difftime(time(NULL),*BeginTime)>=120){
+        return true ;
+    }else {
+        return false;
+    }
+}
+
+void InitMap_3(){
+    for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if(i==0||i==Row+1||j==0||j==Col+1){
+                map[i][j].status=0;
+            }else{
+                map[i][j].HP=MaxHp;
+                map[i][j].element=rand()%5;
+                map[i][j].status=1;
+                BrickLeft++;
             }
         }
     }
-}*/
+}

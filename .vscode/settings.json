@@ -4,6 +4,8 @@
         "sdl_image.h": "c",
         "sdl.h": "c",
         "sdl_ttf.h": "c",
-        "math.h": "c"
+        "math.h": "c",
+        "time.h": "c",
+        "sdl_thread.h": "c"
     }
 }
