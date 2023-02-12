@@ -317,7 +317,7 @@ int Update(void *data){
         //Draw(PlayBackgroundSurface,0,0,Block*18,Block*15);
         DrawMap();
         //printf("redrawmap\n");
-        //DrawBall();
+        DrawBall();
         //printf("redrawball\n");
         DrawBoard();  
         //printf("redrawboard\n");            
@@ -514,9 +514,9 @@ void Load(){
     char BallImageName[30];
     char BoardImageName[30];
     for(int i=0;i<5;i++){
-        sprintf(BrickImageName,"Image/Brick%d.jpg",i+1);
+        sprintf(BrickImageName,"tmp_image/Brick%d.png",i+1);
         BrickSurface[i]=IMG_Load(BrickImageName);
-        sprintf(BallImageName,"Image/Ball%d.jpg",i+1);
+        sprintf(BallImageName,"tmp_image/Ball%d.png",i+1);
         BallSurface[i]=IMG_Load(BallImageName);
         sprintf(BoardImageName,"Image/Board%d.png",i+1);
         BoardSurface[i]=IMG_Load(BoardImageName);
@@ -1219,14 +1219,18 @@ bool IsLose(time_t *BeginTime){
 void InitMap_3(){
     for(int i=0;i<=Row+1;i++){
         for(int j=0;j<=Col+1;j++){
-            if(i==0||i==Row+1||j==0||j==Col+1){
-                map[i][j].status=0;
-            }else{
+            if(((i==2&&(j==5||j==6||j==7||j==8||j==12)))||(i==3&&(j==4||j==9||j==11||j==12))||(i==4&&(j==3||j==10||j==12))||(i==5&&(j==4||j==9||j==11||j==12))||(i==6&&(j==5||j==6||j==7||j==8||j==12))){
                 map[i][j].HP=MaxHp;
                 map[i][j].element=rand()%5;
                 map[i][j].status=1;
                 BrickLeft++;
+            }else{
+                map[i][j].status=0;
             }
         }
     }
+}
+
+void InitMap_4(){
+    
 }
