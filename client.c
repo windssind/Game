@@ -904,6 +904,7 @@ int AnalyseMSG(void *data){
             // is win?
             if(MSG.IsWin==true) Client_Win();
             else if(MSG.IsLose==true) Client_Lose(NULL);
+            else if(MSG.IsNextLevel==true) {ReInitGameobject(++level);return 1;}
             AnalyseMSG_BallOperation(&MSG);
             AnalyseMSG_Board(&MSG);
             AnalyseMSG_Ball(&MSG);
@@ -981,7 +982,6 @@ int SendMSG(void *data){
         memset(MSG,0,sizeof(MessageFromClient));
         if((KeyValue[SDL_SCANCODE_W]||KeyValue[SDL_SCANCODE_S]||KeyValue[SDL_SCANCODE_A]||KeyValue[SDL_SCANCODE_D]||KeyValue[SDL_SCANCODE_Q]||KeyValue[SDL_SCANCODE_E]||KeyValue[SDL_SCANCODE_C]||KeyValue[SDL_SCANCODE_V]||KeyValue[SDL_SCANCODE_R]||KeyValue[SDL_SCANCODE_LSHIFT]||KeyValue[SDL_SCANCODE_ESCAPE]||KeyValue[SDL_SCANCODE_H])){
             HaveMSGSend=true;
-            printf("you click the keyboard\n");
             if(KeyValue[SDL_SCANCODE_W]){
             MSG->IsUP=true;
             }if(KeyValue[SDL_SCANCODE_S]){
@@ -1010,15 +1010,14 @@ int SendMSG(void *data){
         }
             
         while(SDL_PollEvent(&event)){
-            printf("pollevent=%d\n",i);
                 if(event.type==SDL_QUIT){
                     HaveMSGSend=true;
                     MSG->IsQuitGame=QuitGame;
+                    Quit();
             }
         }
         if(HaveMSGSend){
             int sendbytes=send(client_socket,MSG,sizeof (MessageFromClient) ,MSG_DONTWAIT);
-            printf("client:send msg succeed\n");
         if(sendbytes==-1){
             printf("send msg to server failed\n");
         }else if(sendbytes==0){

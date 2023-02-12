@@ -147,7 +147,7 @@ Brick map[Row+2][Col+2];
 Board board[PlayNum];
 int level=1;
 int Power_ID[3];
-int BrickLeft=55;
+int BrickLeft=0;
 int CountPower_Wall=0;
 bool GetPower_Wall=false;
 bool GetPower_Bullet=false;
@@ -190,6 +190,7 @@ int main(){
         Thread_listen(NULL);
        Thread_send(NULL);
         MoveBall(NULL);
+        printf("main:brickleft=%d\n",BrickLeft);
         if(NextLevel(&BeginTime))  Server_NextLevel();
         else if(IsVictory()) Server_Win();
         else if(IsLose(&BeginTime))  Server_Lose(NULL);
@@ -408,15 +409,14 @@ void InitMap(int level){
     switch (level){
     case 1:
         InitMap_1();
-        printf("initmap1\n");
         break;
     case 2:
         InitMap_2();
-        printf("initmap1\n");
+        printf("initmap2\n");
         break;
     case 3:
         InitMap_3();
-        printf("initmap1\n");
+        printf("initmap3\n");
         break;
     case 4:
         InitMap_4();
@@ -485,9 +485,6 @@ Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board){//用链表结构
     return newBall;
 }
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
-    if(board->BallNum==1){
-        return ;
-    }else{
         Ball *tmp=HeadNode;
         while(tmp->next!=DesertedBall){
             tmp=tmp->next;
@@ -496,10 +493,6 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
         tmp->next=DesertedBall->next;
         free(DesertedBall);
         board->BallNum--;
-    }
-    if(PlayNum==2){
-        board->HaveNewBallDeleted=true;
-    }
 }
 
 
@@ -698,7 +691,7 @@ void InitMap_2(){
         for(int j=0;j<Col+2;j++){
             if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==8))||(i==7&&(j==5||j==6||j==7))){
                 map[i][j].element=rand()%5;
-                map[i][j].HP=4;
+                map[i][j].HP=MaxHp;
                 map[i][j].status=1;
                 BrickLeft++;
             }else{
@@ -706,6 +699,7 @@ void InitMap_2(){
             }
         }
     }
+    printf("map2:brickleft=%d\n",BrickLeft);
 };
 
 Uint32 VanishPower_Wall(Uint32 interval,void *param){
@@ -859,6 +853,7 @@ void WaitForResponse_Win(){
 }*/
 bool NextLevel(time_t *BeginTime){
     if(level<5&&BrickLeft<=0){
+        printf("next level jude succeed\n");
         level++;
         *BeginTime=time(NULL);
         return 1;
@@ -939,6 +934,15 @@ void InitMap_5(){
 }
 
 void Server_NextLevel(){
-    level++;
+    printf("server:nextlevel\n,level=%d\n",level);
+    Message MSG;
+    memset(&MSG,0,sizeof(Message));
+    printf("ready\n");
     ReInitGameobject(level);
+    printf("reinit succeed\n");
+    MSG.IsNextLevel=true;
+    for(int i=0;i<PlayNum;i++){
+        send(Player_socket[i],&MSG,sizeof(Message),0);
+    }
+    printf("server;send succeed\n");
 }
