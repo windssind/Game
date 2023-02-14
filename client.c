@@ -9,7 +9,7 @@
 #define Board_w 170
 #define Board_start_x Block*4
 #define Board_start_y Block*12
-#define Ball_radius 13
+#define Ball_radius 18
 #define Col 18
 #define Row 8
 #define UP 1
@@ -28,12 +28,14 @@
 #include"SDL2/SDL_image.h"
 #include"SDL2/SDL_ttf.h"
 #include"SDL2/SDL_thread.h"
+#include"SDL2/SDL_mixer.h"
 #include<time.h>
 #include<math.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include<unistd.h>
 #include<netdb.h>
 enum Element{
     fire,
@@ -81,20 +83,28 @@ typedef struct BallMessage{
     int y;
     int dx;
     int dy;
+    enum Element element;
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
 }BallMessage;
+
+typedef  struct MusicMessage{
+    bool Music_HitBoard;
+    bool Music_CreatNewBall;
+}MusicMessage;
 typedef struct Message{
     Brick map[Row+2][Col+2];
     Board board[2];
     BallMessage ballMessage[2][4];
+    MusicMessage musicMessage;
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
     bool IsNextLevel;
     bool IsWin;
     bool IsLose;
-    bool Ready;
-    bool Disconnected;
+    bool GetPower_Wall;
+    time_t TimeLeft;
+    int Score;
 }Message;
 
 typedef struct MessageFromClient{
@@ -110,6 +120,7 @@ typedef struct MessageFromClient{
 }MessageFromClient;
 
 Board board[2];
+int Power_ID[3];
 /*Bullet BulletPack[2][100];*/
 Brick map[Row+2][Col+2];
 SDL_Window *Window=NULL;
@@ -120,11 +131,8 @@ const int Window_Width=Block*18;
 const int Window_Depth=Block*15;
 int client_socket;
 int level=1;
-int Power_ID[3];
 int BrickLeft=0;
-int CountPower_NewBall=0;
 int CountPower_Wall=0;
-int CountPower_Bullet=0;
 bool GetPower_Wall=false;
 void BuildConnection(int argc,char *argv[]);
 //void PaintFont(const char *text,int x,int y,int w,int h);
@@ -139,6 +147,9 @@ void InitMap_2();
 void InitMap_3();
 void InitMap_4();
 void InitMap_5();
+void TellStory();
+void TellRule();
+void PrintFont(const char*text,int x,int y,int w,int h);
 void InitGameObject();
 void ReInitGameobject(int level);
 void LimitBoard(Board *board);
@@ -161,33 +172,28 @@ void Initgame();
 void InitBall();
 void InitBoard();
 void GetPower();
-void Pause();
 bool IsVictory();
 bool NextLevel(time_t *BeginTime);
 bool IsLose(time_t *BeginTime);
 void AdjustBoardLocation(int operation,Board *board,int times);
-void PrintFont(const char*text);
+void PrintFont(const char*text,int x,int y,int w,int h);
 Uint32 VanishPower_Wall(Uint32 interval,void *param);
-Uint32 VanishPower_Bullet(Uint32 interval,void *param);
-Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
-int Update(void *data);
+int Update(void *data,time_t TimeLeft,int level,int Score);
 void InitMap(int level);
 void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void HitBrick(Board *board,Ball *ball,int NO);
-void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
-bool IsGameOver();
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board);
 void HitBoard(Board *board,Ball *ball,int NO);
 /*Uint32 AnalyseMSG(Uint32 interval,void *param);*/
-int AnalyseMSG(void *data);
+int AnalyseMSG(void *data,time_t *TimeLeft,int *Score);
 int MoveBoard(void *data);
 int MoveBall(void *data);
 SDL_Surface *BrickSurface[5];
+SDL_Texture *BrickTexture[5];
 SDL_Surface *BallSurface[5];
 SDL_Texture *BallTexture[5];
 SDL_Surface *BoardSurface[5];
-SDL_Texture *BoardTexture[5];
 SDL_Surface *PlayBackgroundSurface;
 SDL_Texture *PlayBackgroundTexture;
 SDL_Surface *WinBackgroundSurface;
@@ -196,48 +202,50 @@ SDL_Surface *LoseBackgroundSurface;
 SDL_Texture *LoseBackgroundTexture;
 SDL_Surface *WaitBackgroundSurface;
 SDL_Texture *WaitBackgroundTexture;
+SDL_Surface *ChooseBackgroundSurface;
+SDL_Texture *ChooseBackgroundTexture;
+SDL_Surface *TipBackgroundSurface;
+SDL_Texture *TipBackgroundTexture;
+SDL_Surface *IntroductionBackgroundSurface;
+SDL_Texture *IntroductionBackgroundTexture;
+SDL_Surface *RecordBackgroundSurface;
+SDL_Texture *RecordBackgroundTexture;
+Mix_Chunk *music[11];
 SDL_Rect BackgroundRect;
 const Uint8 *KeyValue;
 int PlayNum;
-void beginTimer();
-void closeTimer();
+int Score=0;
 void Quit();
 int main(int argc,char *argv[]){
+    srand(time(NULL));
     InitAll();
     KeyValue = SDL_GetKeyboardState(NULL);
     if(PlayNum==2){
         BuildConnection(argc,argv);
-        /*WaitForPlayer();*/
         
-    }//beginTimer(&PlayNum);
-    long int BeginTime=time(NULL);int i=0;
+    }
+    time_t BeginTime=time(NULL);
+    Mix_PlayChannel(-1,music[2],0);
     while(1){
-        long int first=clock();
         if(PlayNum==1){
+            printf("Brickleft=%d\n",BrickLeft);
             MoveBall(NULL);
             MoveBoard(NULL);
-        }
-        
-        if(PlayNum==2){
-            SendMSG(NULL);
-            for(int i=0;i<100;i++){
-                AnalyseMSG(NULL);
-            }
-        }
-        Update(NULL);
-        //printf("client:update=%d\n",i);
-        if(PlayNum==1){
-            if(NextLevel(&BeginTime))  ReInitGameobject(level);
-            else if(IsVictory()) Client_Win();
+            Update(NULL,240/PlayNum-(time(NULL)-BeginTime),level,Score);
+            if(IsVictory()) Client_Win();
+            else if(NextLevel(&BeginTime))  ReInitGameobject(level);
             else if(IsLose(&BeginTime))  Client_Lose(&BeginTime);
+        }else if(PlayNum==2){
+            time_t TimeLeft;
+            int Score;
+            SendMSG(NULL);
+            for(int i=0;i<10;i++){
+                AnalyseMSG(NULL,&TimeLeft,&Score);
+            }
+            Update(NULL,TimeLeft,level,Score);
         }
-        if((FPS-(clock()-first)*1000/CLOCKS_PER_SEC)>0){
-            SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
-        }
-    }
-    /*closeTimer();
-    Quit();*/
-    
+        SDL_Delay(FPS);
+    }  
 }
 void BuildConnection(int argc,char *argv[]){
     if(argc<3){ 
@@ -276,24 +284,20 @@ void InitAll(){
     SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_EVERYTHING);//初始化
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
-    Window=SDL_CreateWindow("Sheep",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,Window_Width,Window_Depth,SDL_WINDOW_SHOWN);
+    Mix_Init(MIX_INIT_OGG);
+    Window=SDL_CreateWindow("Sheep",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,Window_Width+Block*9,Window_Depth,SDL_WINDOW_SHOWN);
     if(Window==NULL){
         return;
     }
     Renderer=SDL_CreateRenderer(Window,-1,SDL_RENDERER_ACCELERATED);
     //font=TTF_OpenFont(,25);
     Load();
+    TellStory();
+    TellRule();
     ChooseMod();
     Initgame();
+    Mix_PlayChannel(-1,music[10],-1);
 }
-
-/*void PaintFont(const char *text,int x,int y,int w,int h){
-    SDL_Surface Surface=TTF_RenderUTF8_Blended(font,text,FontColor);
-    SDL_Texture Texture=SDL_CreateTextureFromSurface(Surface);
-    SDL_Rect Rect={x,y,w,h};
-    SDL_RenderCopy(Renderer,Texture,NULL,&Rect);
-    SDL_DestroyTexture(Texture);
-}*/
 
 void InitMap(int level){
     switch (level){
@@ -306,28 +310,32 @@ void InitMap(int level){
     case 3:
         InitMap_3();
         break;
+    case 4:
+        InitMap_4();
+        break;
+    case 5:
+        InitMap_5();
+        break;
     default:
         break;
     }
     return ;
 }
 
-int Update(void *data){
+int Update(void *data,time_t TimeLeft,int level,int Score){
         SDL_RenderClear(Renderer);
-        //Draw(PlayBackgroundSurface,0,0,Block*18,Block*15);
+        Draw(PlayBackgroundSurface,0,0,Block*18,Block*15);
+        Draw(RecordBackgroundSurface,Block*18,0,Block*9,Block*15);
+        char str[20];
+        PrintFont(SDL_itoa((int)(TimeLeft),str,10),Block*20,Block*8,Block*1.5,Block*1.5);
+        PrintFont(SDL_itoa(level,str,10),Block*20,Block*10.8,Block*1.5,Block*1.5);
+        PrintFont(SDL_itoa(Score,str,10),Block*20,Block*13.8,Block*1.5,Block*1.5);
         DrawMap();
-        //printf("redrawmap\n");
         DrawBall();
-        //printf("redrawball\n");
-        DrawBoard();  
-        //printf("redrawboard\n");            
-        /*if(GetPower_Wall){
+        DrawBoard();            
+        if(GetPower_Wall){
             DrawWall();
-        }   */
-    /*if(GetPower_Bullet){
-        DrawBullet();
-        printf("wronginto bullet\n");
-    }*/
+        }
         SDL_RenderPresent(Renderer);
     }
     
@@ -342,7 +350,8 @@ void DrawMap(){
     for(int i=0;i<Row+2;i++){
         for(int j=0;j<Col+2;j++){
             if(map[i][j].status==1){
-                Draw(BrickSurface[map[i][j].element],Block*(j-1),Block*(i-1),Block,Block);
+                SDL_Rect BrickRect={Block*(j-1),Block*(i-1),Block,Block};
+                SDL_RenderCopy(Renderer,BrickTexture[map[i][j].element],NULL,&BrickRect);
             }
         }
     }
@@ -351,8 +360,9 @@ void DrawBall(){
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
-           Draw(BallSurface[tmp->element],tmp->x,tmp->y,tmp->radius*2,tmp->radius*2);
-           tmp=tmp->next;
+            SDL_Rect BallRect={tmp->x,tmp->y,tmp->radius*2,tmp->radius*2};
+            SDL_RenderCopy(Renderer,BallTexture[tmp->element],NULL,&BallRect);
+            tmp=tmp->next;
         }
     }
 }
@@ -365,9 +375,8 @@ void DrawBoard(){
 
 int MoveBoard(void *data){
         SDL_Event event;
-        if(PlayNum==1){
             int times;
-            if(KeyValue[SDL_SCANCODE_BACKSPACE]){
+            if(KeyValue[SDL_SCANCODE_SPACE]){
                 times=2;
             }else{
                 times=1;
@@ -401,15 +410,15 @@ int MoveBoard(void *data){
             if(event.type==SDL_QUIT){
                 Quit();
             }else if(event.type==SDL_KEYDOWN){
-                if(event.key.keysym.sym==SDLK_c){
-                    board[0].element=(board[0].element+1)%5;
-                }
+                if(event.key.keysym.sym==SDLK_q) board[0].element=0;
+                if(event.key.keysym.sym==SDLK_e) board[0].element=1;
+                if(event.key.keysym.sym==SDLK_c) board[0].element=2;
+                if(event.key.keysym.sym==SDLK_v) board[0].element=3;
+                if(event.key.keysym.sym==SDLK_r) board[0].element=4;
             } 
         }
      
         }
-        
-    }
 
 //一直重复a的原因：getkeyboardstate函数是以事件为基础的，不删除事件，这个按下了a就会一直在消息队列里
 
@@ -426,6 +435,7 @@ int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖�
             if(tmp->dx==0&&tmp->dy==0){
                 tmp->x=board[i].x+board[i].w/2;
                 tmp->y=board[i].y-tmp->radius*2;
+                tmp->element=board[i].element;
             }
             DestroyBrick();
             tmp=tmp->next;// 有bug，如果delete了，就会有问题
@@ -434,17 +444,12 @@ int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖�
     }
 }
 void GetPower(){
-        /*if(CountPower_Wall>=10*PlayNum){// 长时间的
+        if(CountPower_Wall>=3){// 长时间的
         GetPower_Wall=true;
         Power_ID[1]=SDL_AddTimer(5000,VanishPower_Wall,NULL);
-        }*/
+        CountPower_Wall=0;
+        }
     }
-    
-    /*if(BrickLeft<=5&&GetPower_Bullet==false){//场上方块数量很少
-        GetPower_Bullet=true;
-        Power_ID[2]=SDL_AddTimer(60,CreatAndMoveAndHitCheckBullet,NULL);
-        Power_ID[3]=SDL_AddTimer(5000,VanishPower_Bullet,NULL);
-    }*/
  
 Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board){//用链表结构
     Ball *newBall=(Ball*)malloc(sizeof(Ball));
@@ -472,41 +477,25 @@ void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board){
         board->BallNum--;
     }
 
-void InitMap_1(){
+void InitMap_5(){
     for(int i=0;i<=Row+1;i++){
         for(int j=0;j<=Col+1;j++){
             if(i==0||i==Row+1||j==0||j==Col+1){
                 map[i][j].status=0;
-            }/*else{
+            }else if(i==1||i==j||i+j==10||i+j==19||i==j-9){
                 map[i][j].HP=MaxHp;
-                map[i][j].element=rand()%5;
-                map[i][j].status=rand()%2;
+                map[i][j].status=1;
                 BrickLeft++;
-            }*/else{
+                if(i==1) map[i][j].element=thunder;
+                else if(i==j) map[i][j].element=fire;
+                else if(i+j==10)  map[i][j].element=water;
+                else if(i+j==19)  map[i][j].element=thunder;
+                else if(i==j-9)  map[i][j].element=ice;
+            }else{
                 map[i][j].status=0;
             }
-
         }
     }
-}
-
-void beginTimer(){
-    //SDL_CreateThread(Update,"Update",(void*)NULL);
-    if(PlayNum==1){
-        SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);// moveball include hitcheck(so messy)
-        SDL_CreateThread(MoveBoard,"MoveBoard",(void*)NULL);
-    }
-    if(PlayNum==2){
-        //SDL_CreateThread(SendMSG,"SendMSG",(void*)NULL);
-        SDL_CreateThread(AnalyseMSG,"AnalyseMSG",(void*)NULL);
-    }
-}
-
-void closeTimer(){
-    for(int i=0;i<4;i++){
-        SDL_RemoveTimer(i);
-    }
-    
 }
 
 void Load(){
@@ -516,28 +505,47 @@ void Load(){
     for(int i=0;i<5;i++){
         sprintf(BrickImageName,"tmp_image/Brick%d.png",i+1);
         BrickSurface[i]=IMG_Load(BrickImageName);
-        sprintf(BallImageName,"tmp_image/Ball%d.png",i+1);
+        BrickTexture[i]=SDL_CreateTextureFromSurface(Renderer,BrickSurface[i]);
+        sprintf(BallImageName,"Image/Ball%d.png",i+1);
         BallSurface[i]=IMG_Load(BallImageName);
+        BallTexture[i]=SDL_CreateTextureFromSurface(Renderer,BallSurface[i]);
         sprintf(BoardImageName,"Image/Board%d.png",i+1);
         BoardSurface[i]=IMG_Load(BoardImageName);
         memset(BrickImageName,0,sizeof BrickImageName);
         memset(BallImageName,0,sizeof BallImageName);
         memset(BoardImageName,0,sizeof BoardImageName);
     }
-    PlayBackgroundSurface=IMG_Load("Image/PlayBackground.jpg");
+    if(Mix_OpenAudio(MIX_DEFAULT_FREQUENCY,MIX_DEFAULT_FORMAT,MIX_DEFAULT_CHANNELS,4096)==-1) printf("openduio wrong\n");
+    char MusicName[30];
+    for(int i=0;i<11;i++){
+        sprintf(MusicName,"tmp_image/Music%d.wav",i+1);
+        music[i]=Mix_LoadWAV(MusicName);
+        printf("%s\n",Mix_GetError());
+        memset(MusicName,0,sizeof MusicName);
+    }
+    printf("%s\n",Mix_GetError());
+    PlayBackgroundSurface=IMG_Load("Image/PlayBackground.png");
     PlayBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,PlayBackgroundSurface);
-    WinBackgroundSurface=IMG_Load("Image/WinBackground.jpg");
+    WinBackgroundSurface=IMG_Load("Image/WinBackground.png");
     WinBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,WinBackgroundSurface);
-    LoseBackgroundSurface=IMG_Load("Image/LoseBackground.jpg");
+    LoseBackgroundSurface=IMG_Load("Image/LoseBackground.png");
     LoseBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,LoseBackgroundSurface);
-    WaitBackgroundSurface=IMG_Load("Image/WaitBackground.jpg");
+    WaitBackgroundSurface=IMG_Load("Image/WaitBackground.png");
     WaitBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,WaitBackgroundSurface);
+    ChooseBackgroundSurface=IMG_Load("Image/ChooseBackground.png");
+    ChooseBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,ChooseBackgroundSurface);
+    TipBackgroundSurface=IMG_Load("Image/TipBackground.png");
+    TipBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,TipBackgroundSurface);
+    IntroductionBackgroundSurface=IMG_Load("Image/IntroductionBackground.png");
+    IntroductionBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,IntroductionBackgroundSurface);
+    RecordBackgroundSurface=IMG_Load("Image/RecordBackground.png");
+    RecordBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,RecordBackgroundSurface);
     BackgroundRect.h=Block*15;
     BackgroundRect.w=Block*18;
     BackgroundRect.x=0;
     BackgroundRect.y=0;
-    /*WaitBackgroundSurface=IMG_Load("Image/Board1.png");
-    WaitBackgroundTexture=SDL_CreateTextureFromSurface(Renderer,PlayBackgroundSurface);*/
+    font=TTF_OpenFont("font.TTF",50);
+    
 }
 
 
@@ -550,7 +558,7 @@ void HitBrick(Board *board,Ball *ball,int NO){
     int y=ball->y;
     int col=x/Block+1;
     int row=y/Block+1;
-    if(col>=0&&col<=Col+1&&row>=0&&row<=Row+1){// 有碰撞的可能
+    if(col>0&&col<=Col+1&&row>=0&&row<Row+1){// 有碰撞的可能
         if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)&&map[row-1][col].status==1){//上边碰撞
             location.x=col;
             location.y=row-1;
@@ -588,8 +596,6 @@ void HitBrick(Board *board,Ball *ball,int NO){
             return ;
         }
         ElementalAttack(ball,location);
-        /*GetPower();*/
-        /*这个地方误差值+3的引入很巧妙，肉眼无法观察，但完美解决了碰撞问题*/
     }
 }
 
@@ -601,44 +607,57 @@ void ElementalAttack(Ball *ball,Location location){
     Brick *ToBeAttacked=&map[location.y][location.x];
     if(ToBeAttacked->element==fire){// 砖块是火元素
         if(ball->element==water||ball->element==thunder||ball->element==ice){//元素反应
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else{// 火火相碰
+            Score+=3;
             ToBeAttacked->HP-=1;
         }
     }else if(ToBeAttacked->element==water){// 砖块是水元素
         if(ball->element==fire){
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else if(ball->element==thunder){
             for(int i=location.y-1;i<=location.y+1;i++){
                 for(int j=location.x-1;j<=location.x+1;j++){
                     if(map[i][j].status==1){
-                        map[i][j].HP-=1;
+                        Score+=3;
+                        map[i][j].HP-=2;
                     }
                 }
             }
         }else{
+            Score+=3;
             ToBeAttacked->HP-=1;
         }
     }else if(ToBeAttacked->element==thunder){// 砖块是雷元素
         if(ball->element==fire){
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else if(ball->element==water){
             for(int i=location.y-1;i<=location.y+1;i++){
                 for(int j=location.x-1;j<=location.x+1;j++){
                     if(map[i][j].status==1){
-                        map[i][j].HP-=1;
+                        Score+=3;
+                        map[i][j].HP-=2;
                     }
                 }
             }
         }else if(ball->element==ice){
+            Score+=10;
+            ball->dy=-ball->dy;
             ToBeAttacked->HP-=4;
         }else{
+            Score+=2;
             ToBeAttacked->HP-=1;
         }
     }else if(ToBeAttacked->element==ice){
         if(ball->element==fire){
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else if(ball->element==thunder){
+            Score+=10;
+            ball->dy=-ball->dy;
             ToBeAttacked->HP-=4;
         }else{
             ToBeAttacked->HP-=1;
@@ -650,8 +669,8 @@ void ElementalAttack(Ball *ball,Location location){
 }
 
 void DestroyBrick(){
-    for(int i=1;i<=Row;i++){
-        for(int j=1;j<=Col;j++){
+    for(int i=0;i<=Row;i++){
+        for(int j=0;j<=Col;j++){
             if(map[i][j].status==1&&map[i][j].HP<=0){
                 map[i][j].status=0;
                 BrickLeft--;
@@ -666,10 +685,12 @@ void HitBoard(Board *board,Ball *ball,int NO){
             ball->dy=-ball->dy+board[NO].dy/6;
             ball->element=board[NO].element;
             board[NO].CountPower_NewBall++;
+            Mix_PlayChannel(-1,music[rand()%3+3],0);
             if(board[NO].CountPower_NewBall>=4&&board[NO].BallNum<=3){
                 CreatBall(board[NO].HeadNode,board[NO].x+board[NO].w/2,board[NO].y-Ball_radius*2,&board[NO]);
                 board[NO].HaveNewBallCreated=true;
                 board[NO].CountPower_NewBall=0;
+                Mix_PlayChannel(-1,music[rand()%6+2],0);
             }
         }
             return ;
@@ -677,22 +698,16 @@ void HitBoard(Board *board,Ball *ball,int NO){
 
 Uint32 VanishPower_Wall(Uint32 interval,void *param){
     GetPower_Wall=false;
+    printf("vanish power\n");
     SDL_RemoveTimer(Power_ID[1]);
     return interval;
 }
 
-/*Uint32 VanishPower_Bullet(Uint32 interval,void *param){
-    GetPower_Bullet=false;
-    //DeleteBullet(); 
-    SDL_RemoveTimer(Power_ID[2]);
-    SDL_RemoveTimer(Power_ID[3]);
-    return interval;
-}*/
-
 void ChooseMod(){
     SDL_RenderClear(Renderer);
-    SDL_RenderCopy(Renderer,PlayBackgroundTexture,NULL,&BackgroundRect);
+    SDL_RenderCopy(Renderer,ChooseBackgroundTexture,NULL,&BackgroundRect);
     SDL_RenderPresent(Renderer);
+    int channel=Mix_PlayChannel(-1,music[1],0);
     SDL_Event event;
     while(1){
         while(SDL_WaitEvent(&event)){
@@ -716,73 +731,49 @@ void ChooseMod(){
         }
     }
     }
+    Mix_HaltChannel(channel);
     
 }
 
-/*Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param){
-    // Creat
-    int NewNO[2];
-    for(int i=0;i<PlayNum;i++){
-        NewNO[i]=BulletPack[i][0].BulletNum+1;
-    }
-    
-    for(int i=0;i<PlayNum;i++){
-        BulletPack[i][NewNO[i]].status=1;
-        BulletPack[i][NewNO[i]].BulletDistance=20;
-        BulletPack[i][NewNO[i]].BulletLength=20;
-        BulletPack[i][NewNO[i]].x=board[i].x+5;
-        BulletPack[i][NewNO[i]].y=board[i].y;
-        BulletPack[i][0].BulletNum++;
-    }
-    // Move
-    for(int i=0;i<PlayNum;i++){
-        for(int j=0;j<BulletPack[i][0].BulletNum-1;j++){
-            if(BulletPack[i][j].status==1){
-                BulletPack[i][j].y+=BulletPack[i][j].dy;
-            }
-        }
-    }
-    // Hitcheck
-    for(int i=0;i<PlayNum;i++){
-        for(int j=0;j<BulletPack[i][NewNO[i]].BulletNum;j++){
-            if(BulletPack[i][j].status==1){
-                int col=BulletPack[i][j].x/Block+1;
-                int row=BulletPack[i][j].y/Block+1;
-                if(BulletPack[i][j].y<=0){
-                    map[row][col].status=0;
-                }else if(map[row][col].status==1){
-                    map[row][col].HP-=1;
-                }
-            }
-        }
-    }
-}*/
+
 
 void Initgame(){
     InitGameObject();
 }
 
-/*void DeleteBullet(){
-    for(int i=0;i<PlayNum;i++){
-        for(int j=0;j<BulletPack[i][0].BulletNum;j++){
-            BulletPack[i][j].status=0;
-        }
-    }
-}*/
 
 void Quit(){
     for(int i=0;i<5;i++){
-        SDL_DestroyTexture(BoardTexture[i]);
-        SDL_DestroyTexture(BallTexture[i]);
-    }
-    for(int i=0;i<5;i++){
         SDL_FreeSurface(BoardSurface[i]);
+        SDL_DestroyTexture(BallTexture[i]);
         SDL_FreeSurface(BallSurface[i]);
         SDL_FreeSurface(BrickSurface[i]);
+        SDL_DestroyTexture(BrickTexture[i]);
     }
+    for(int i=0;i<11;i++){
+        Mix_FreeChunk(music[i]);
+    }
+    SDL_FreeSurface(PlayBackgroundSurface);
+    SDL_FreeSurface(WaitBackgroundSurface);
+    SDL_FreeSurface(WinBackgroundSurface);
+    SDL_FreeSurface(LoseBackgroundSurface);
+    SDL_FreeSurface(ChooseBackgroundSurface);
+    SDL_FreeSurface(RecordBackgroundSurface);
+    SDL_FreeSurface(TipBackgroundSurface);
+    SDL_FreeSurface(IntroductionBackgroundSurface);
     SDL_DestroyTexture(PlayBackgroundTexture);
+    SDL_DestroyTexture(WaitBackgroundTexture);
+    SDL_DestroyTexture(WinBackgroundTexture);
+    SDL_DestroyTexture(LoseBackgroundTexture);
+    SDL_DestroyTexture(ChooseBackgroundTexture);
+    SDL_DestroyTexture(TipBackgroundTexture);
+    SDL_DestroyTexture(RecordBackgroundTexture);
+    SDL_DestroyTexture(IntroductionBackgroundTexture);
     SDL_DestroyRenderer(Renderer);
     SDL_DestroyWindow(Window);
+    if(PlayNum==2){
+        close(client_socket);
+    }
     SDL_Quit();
 }
 
@@ -808,8 +799,6 @@ void InitBoard(){
         board[i].HaveNewBallCreated=false;
         if(PlayNum==1){
             board[0].x=Board_start_x+Block*3;
-        }else{
-            board[i].x=Block*i*4+Block*4;
         }
     }
 }
@@ -820,59 +809,51 @@ void InitBall(){
     }
 }
 
-void Pause(){
-    SDL_RenderClear(Renderer);
-    SDL_RenderCopy(Renderer,BallTexture[0],NULL,&BackgroundRect);
-    SDL_RenderPresent(Renderer);
-    SDL_Event event;
-    while(SDL_WaitEvent(&event)){
-        switch(event.type){
-            case SDL_KEYDOWN:
-                switch(event.key.keysym.sym){
-                    case SDLK_TAB:
-                    return ;
-                    case SDLK_ESCAPE:
-                        Quit();
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            case SDL_QUIT:
-                Quit();
-                break;
-            default:
-                break;
-        }
-    }
-}
 
-/*void PrintFont(const char*text){
-    SDL_Surface Font=
-}*/
+void PrintFont(const char*text,int x,int y,int w,int h){
+    SDL_Surface *FontSurface=TTF_RenderUTF8_Blended(font,text,FontColor);
+    SDL_Texture *FontTexture=SDL_CreateTextureFromSurface(Renderer,FontSurface);
+    SDL_Rect FontRect={x,y,w,h};
+    SDL_RenderCopy(Renderer,FontTexture,NULL,&FontRect);
+    SDL_FreeSurface(FontSurface);
+    SDL_DestroyTexture(FontTexture);
+}
 
 void InitMap_2(){
     for(int i=0;i<Row+2;i++){
         for(int j=0;j<Col+2;j++){
-            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==9))||(i==7&&(j==5||j==6||j==7||j==8))){
-                map[i][j].element=rand()%5;
-                map[i][j].HP=4;
+            if((j==2&&(i==4||i==5))||(j==3&&(i==3||i==6))||(j==4&&(i==2||i==7))){
                 map[i][j].status=1;
+                map[i][j].element=fire;
+                map[i][j].HP=MaxHp;
+                BrickLeft++;
+            }else if((j==5&&(i==2||i==7))||(j==6&&(i==3||i==6))||(j==7&&(i==4||i==5))){
+                map[i][j].status=1;
+                map[i][j].element=water;
+                map[i][j].HP=MaxHp;
+                BrickLeft++;
+            }else if(j==12&&(i>=2&&i<=8)){
+                map[i][j].status=1;
+                map[i][j].element=thunder;
+                map[i][j].HP=MaxHp;
+                BrickLeft++;
+            }else if((j==13&&(i==2||i==5))||(j==14&&(i==2||i==5))||(j==14&&(i==3||i==4))){
+                map[i][j].status=1;
+                map[i][j].element=ice;
+                map[i][j].HP=MaxHp;
                 BrickLeft++;
             }else{
                 map[i][j].status=0;
             }
-        }
     }
+    printf("map2:brickleft=%d\n",BrickLeft);
 };
+}
 
 void DrawWall(){
-    Draw(BrickSurface[4],0,Block*17.8,Block*16,Block*0.2);
+    Draw(BrickSurface[4],0,Block*14.6,Block*18.,Block*0.4);
 }
 
-void DrawBullet(){
-
-}
 
 int dist(int x1,int y1,int x2,int y2){
     return sqrt(abs((x1-x2)*(x1-x2))+((y1-y2)*(y1-y2)));
@@ -896,7 +877,7 @@ void Launch(Board *board){
 // 后期再优化帧率把
 // 碰撞的时候巧妙利用视觉残留，不用过于精准
 
-int AnalyseMSG(void *data){
+int AnalyseMSG(void *data,time_t *TimeLeft,int *Score){
         Message MSG;
         memset(&MSG,0,sizeof(Message));
         if(recv(client_socket,&MSG,sizeof(Message),MSG_DONTWAIT)>=0){
@@ -904,6 +885,11 @@ int AnalyseMSG(void *data){
             if(MSG.IsWin==true) Client_Win();
             else if(MSG.IsLose==true) Client_Lose(NULL);
             else if(MSG.IsNextLevel==true) {ReInitGameobject(++level);return 1;}
+            GetPower_Wall=(MSG.GetPower_Wall==true?true:false);
+            *Score=MSG.Score;
+            *TimeLeft=MSG.TimeLeft;
+            if(MSG.musicMessage.Music_CreatNewBall==true)  Mix_PlayChannel(-1,music[rand()%2+6],0);
+            if(MSG.musicMessage.Music_HitBoard==true)   Mix_PlayChannel(-1,music[rand()%3+3],0);
             AnalyseMSG_BallOperation(&MSG);
             AnalyseMSG_Board(&MSG);
             AnalyseMSG_Ball(&MSG);
@@ -912,19 +898,6 @@ int AnalyseMSG(void *data){
         }
 }
 
-// 小心这个错误，两个程序中的内存位置是不一样的
-/* if(PlayNum==2){
-            Message MSG;
-            MSG.board=&board[0];
-            if(IsLaunch){
-                MSG.isLaunch=true;
-            }else{
-                MSG.isLaunch=false;
-            }
-            if(send(client_socket,&MSG,sizeof(Message),0)==-1){
-                perror("send");
-            }
-        }*/
 
 void AdjustBoardLocation(int operation,Board *board,int times){
     if(operation==RIGHT){
@@ -956,16 +929,16 @@ void AdjustBoardLocation(int operation,Board *board,int times){
         board->x=0;
         board->dx=0;
     }
-    if(board->x+board->w>=Block*15){
-        board->x=Block*15-board->w;
+    if(board->x+board->w>=Block*18){
+        board->x=Block*18-board->w;
         board->dx=0;
     }
     if(board->y<=Block*14){
         board->y=Block*14;
         board->dy=0;
     }
-    if(board->y+board->h>=Block*18){
-        board->y=Block*18-board->h;
+    if(board->y+board->h>=Block*14.5){
+        board->y=Block*14.5-board->h;
         board->dy=0;
     }
 }
@@ -989,7 +962,10 @@ int SendMSG(void *data){
             MSG->IsLeft=true;
             }if(KeyValue[SDL_SCANCODE_D]){
             MSG->IsRight=true;
-            }if(KeyValue[SDL_SCANCODE_Q]){
+            }if(KeyValue[SDL_SCANCODE_R]){
+            MSG->ChangeColor=normal;
+            }else MSG->ChangeColor=10;
+            if(KeyValue[SDL_SCANCODE_Q]){
             MSG->ChangeColor=fire;
             }if(KeyValue[SDL_SCANCODE_E]){
             MSG->ChangeColor=water;
@@ -997,15 +973,15 @@ int SendMSG(void *data){
             MSG->ChangeColor=thunder;
             }if(KeyValue[SDL_SCANCODE_V]){
             MSG->ChangeColor=ice;
-            }if(KeyValue[SDL_SCANCODE_R]){
-            MSG->ChangeColor=normal;
             }if(KeyValue[SDL_SCANCODE_ESCAPE]){
             MSG->IsQuitGame=true;
-            }if(KeyValue[SDL_SCANCODE_LSHIFT]){
+            }if(KeyValue[SDL_SCANCODE_SPACE]){
             MSG->IsShift=true;
             }if(KeyValue[SDL_SCANCODE_H]){
             MSG->IsLaunchBall=true;
             }
+        }else{
+            MSG->ChangeColor=10;
         }
             
         while(SDL_PollEvent(&event)){
@@ -1023,11 +999,6 @@ int SendMSG(void *data){
             printf("disconnected\n");
         }
         }
-        //int interval;
-        /*if((interval=FPS-(clock()-first)*1000/CLOCKS_PER_SEC)>0){
-            SDL_Delay(interval);
-        }*/
-        
 }   
 
 
@@ -1048,19 +1019,19 @@ void LimitBoard(Board *board){
         board->y=Window_Depth-Block*3;
         board->dy=0;
     }
-    if(board->y+board->h>=Window_Depth){
-        board->y=Window_Depth-board->h;
+    if(board->y+board->h>=Window_Depth-Block*0.5){
+        board->y=Window_Depth-board->h-Block*0.5;
         board->dy=0;
     }
 }
 
 void HitWall(Board *board,Ball *ball,int NO){
     Ball *tmp=ball;
-            if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Window_Width){// 左边碰撞或者右边碰撞
+            if((tmp->x-tmp->radius<=0&&tmp->dx<0)||(tmp->x+tmp->radius>=Window_Width&&tmp->dx>0)){// 左边碰撞或者右边碰撞
                 tmp->dx=-tmp->dx;
-            }else if(tmp->y-tmp->radius<=0){// 上边碰撞
+            }else if(tmp->y-tmp->radius<=0&&tmp->dy<0){// 上边碰撞
                 tmp->dy=-tmp->dy;
-            }else if(tmp->y+tmp->radius>=Window_Depth-Block*0.4){// 下边碰撞
+            }else if(tmp->y+tmp->radius>=Window_Depth-Block*0.6){// 下边碰撞
                 if(GetPower_Wall){// 用playnum来维护有多少个挡板
                     tmp->dy=-tmp->dy;
                 }else{// 没有墙壁
@@ -1095,6 +1066,7 @@ void AnalyseMSG_Ball(Message *MSG){
             tmp->dy=MSG->ballMessage[i][j].dy;
             tmp->y=MSG->ballMessage[i][j].y;
             tmp->x=MSG->ballMessage[i][j].x;
+            tmp->element=MSG->ballMessage[i][j].element;
             tmp=tmp->next;
         }
     }
@@ -1159,7 +1131,11 @@ bool NextLevel(time_t *BeginTime){
         level++;
         *BeginTime=time(NULL);
         return 1;
-    }else{
+    }else if(level==5&&BrickLeft<=0){
+        level++;
+        return 0;
+    }
+    else{
         return 0;
     }
 }
@@ -1184,9 +1160,13 @@ void Client_Win(){
         }
 
 void Client_Lose(time_t *BeginTime){
+    printf("LOse\n");
         SDL_RenderClear(Renderer);
         SDL_RenderCopy(Renderer,LoseBackgroundTexture,NULL,&BackgroundRect);
         SDL_RenderPresent(Renderer);
+        printf("Unable to update\n");
+        Mix_PlayChannel(-1,music[9],0);
+        printf("Unable to music\n");
         SDL_Event event;
         while(1){
             if(SDL_PollEvent(&event)){
@@ -1209,7 +1189,7 @@ void Client_Lose(time_t *BeginTime){
 }
 
 bool IsLose(time_t *BeginTime){
-    if(difftime(time(NULL),*BeginTime)>=120){
+    if(difftime(time(NULL),*BeginTime)>=240/PlayNum){
         return true ;
     }else {
         return false;
@@ -1219,18 +1199,125 @@ bool IsLose(time_t *BeginTime){
 void InitMap_3(){
     for(int i=0;i<=Row+1;i++){
         for(int j=0;j<=Col+1;j++){
-            if(((i==2&&(j==5||j==6||j==7||j==8||j==12)))||(i==3&&(j==4||j==9||j==11||j==12))||(i==4&&(j==3||j==10||j==12))||(i==5&&(j==4||j==9||j==11||j==12))||(i==6&&(j==5||j==6||j==7||j==8||j==12))){
+           if((j==2&&(i>=3&&i<=7))||(j==3&&i==5)||(j==4&&(i==4||i==6))||(j==5&&(i==3||i==7))){
                 map[i][j].HP=MaxHp;
-                map[i][j].element=rand()%5;
+                map[i][j].element=fire;
                 map[i][j].status=1;
                 BrickLeft++;
-            }else{
+           }else if((j==7&&(i>=3&&i<=7))||(i==7&&(j==8||j==9))){
+                map[i][j].HP=MaxHp;
+                map[i][j].element=water;
+                map[i][j].status=1;
+                BrickLeft++;
+           }else if((j==11&&(i>=3&&i<=7))||((j==12||j==13)&&(i==3||i==5||i==7))){
+                map[i][j].HP=MaxHp;
+                map[i][j].element=thunder;
+                map[i][j].status=1;
+                BrickLeft++;
+           }else if((j==15&&(i>=3&&i<=7))||((j==16||j==17)&&(i==3||i==5||i==7))){
+                map[i][j].HP=MaxHp;
+                map[i][j].element=ice;
+                map[i][j].status=1;
+                BrickLeft++;
+           }else{
+                map[i][j].status=0;
+           }
+        }
+    }
+}
+
+void InitMap_4(){
+     for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if((i==1&&(j!=0&&j!=Col+1))||((j>i&&j<Col+1-i)&&i!=Row+1&&i!=0)){
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+                if(i>=1&&i<=2) map[i][j].element=ice;
+                else if(i>=3&&i<=4)  map[i][j].element=fire;
+                else if(i>=5&&i<=6)   map[i][j].element=thunder;
+                else if(i>=7&&i<=8)   map[i][j].element=water;
+            }else {
                 map[i][j].status=0;
             }
         }
     }
 }
 
-void InitMap_4(){
-    
+void InitMap_1(){
+    for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if(i==0||j==0||i==Row+1||j==Col+1){
+                map[i][j].status=0;
+            }else if((i==2||i==3)&&(j>=2&&j<=6)){
+                map[i][j].element=fire;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==4||i==5)&&(j>=8&&j<=12)){
+                map[i][j].element=water;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==2||i==3)&&(j>=13&&j<=17)){
+                map[i][j].element=thunder;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==6||i==7)&&(j>=2&&j<=6)){
+                map[i][j].element=ice;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==6||i==7)&&(j>=13&&j<=17)){
+                map[i][j].element=normal;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }
+        }
+    }
 }
+
+void TellStory(){
+    SDL_RenderClear(Renderer);
+    SDL_RenderCopy(Renderer,IntroductionBackgroundTexture,NULL,&BackgroundRect);
+    SDL_RenderPresent(Renderer);
+    SDL_Event event;
+    while(1){
+        while(SDL_PollEvent(&event)){
+            if(event.type==SDL_KEYDOWN){
+                if(event.key.keysym.sym==SDLK_ESCAPE){
+                    Quit();
+                }else if(event.key.keysym.sym==SDLK_RETURN){
+                    return ;
+                }
+            }else if(event.type==SDL_QUIT){
+                Quit();
+            }
+        }
+    }
+}
+
+void TellRule(){
+    SDL_RenderClear(Renderer);
+    SDL_RenderCopy(Renderer,TipBackgroundTexture,NULL,&BackgroundRect);
+    SDL_RenderPresent(Renderer);
+    int channel=Mix_PlayChannel(-1,music[0],0);
+    SDL_Event event;
+    while(1){
+        while(SDL_PollEvent(&event)){
+            if(event.type==SDL_KEYDOWN){
+                if(event.key.keysym.sym==SDLK_ESCAPE){
+                    Quit();
+                }else if(event.key.keysym.sym==SDLK_RETURN){
+                    return ;
+                }
+            }else if(event.type==SDL_QUIT){
+                Quit();
+            }
+        }
+    }
+    Mix_HaltChannel(channel);
+}
+

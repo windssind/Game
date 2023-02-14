@@ -10,7 +10,7 @@
 #define Board_w 170
 #define Board_start_x Block*4
 #define Board_start_y Block*12
-#define Ball_radius 13
+#define Ball_radius 18
 #define Col 18
 #define Row 8
 #define UP 1
@@ -85,18 +85,27 @@ typedef struct BallMessage{
     int y;
     int dx;
     int dy;
+    enum Element element;
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
 }BallMessage;
+typedef  struct MusicMessage{
+    bool Music_HitBoard;
+    bool Music_CreatNewBall;
+}MusicMessage;
 typedef struct Message{
     Brick map[Row+2][Col+2];
     Board board[2];
     BallMessage ballMessage[2][4];
+    MusicMessage musicMessage;
     bool HaveNewBallCreated;
     bool HaveNewBallDeleted;
     bool IsNextLevel;
     bool IsWin;
     bool IsLose;
+    bool GetPower_Wall;
+    time_t TimeLeft;
+    int Score;
 }Message;
 typedef struct MessageFromClient{
     bool IsUP;
@@ -113,17 +122,15 @@ Board board[2];// two board
 int socket_listen;// 监听的套接字
 int Player_socket[PlayNum];// 服务于 player 的套接字
 void WaitForConnection();
-void ExchangeMessage();
 void RecvMSG(int NO,MessageFromClient *MSG);
-void CreatThread();
 void CopyMap(Message *MSG);
 void CopyBoard(Message *MSG);
 void CopyBall(Message *MSG);
 void AnalyseMSG(int NO,MessageFromClient *instruction);
-int Thread_send(void *data);
+int Thread_send(void *data,time_t TimeLeft,Message MSG);
 int Thread_listen(void *data);
 void SendMSG(int NO,Message *MSG);
-void HitBoard(Board *board,Ball *ball,int NO);
+void HitBoard(Board *board,Ball *ball,int NO,Message *MSG);
 void HitBrick(Board *board,Ball *ball,int NO);
 void HitWall(Board *board,Ball *ball,int NO);
 void InitBall();
@@ -140,17 +147,14 @@ bool IsLose(time_t *BeginTime);
 void Server_Win();
 void Server_Lose();
 void Server_NextLevel();
-bool IsVictory();
-bool NextLevel();
-bool IsLose();
 Brick map[Row+2][Col+2];
 Board board[PlayNum];
 int level=1;
+int Score=0;
 int Power_ID[3];
 int BrickLeft=0;
 int CountPower_Wall=0;
 bool GetPower_Wall=false;
-bool GetPower_Bullet=false;
 //void PaintFont(const char *text,int x,int y,int w,int h);
 Ball *CreatBall(Ball *HeadNode,int x,int y,Board *board);
 void InitMap_1();
@@ -165,19 +169,13 @@ void ElementalAttack(Ball *ball,Location location);
 void DestroyBrick();
 void GetPower();
 void AdjustBoardLocation(int operation,Board *board,int times);
-void PrintFont(const char*text);
 Uint32 VanishPower_Wall(Uint32 interval,void *param);
-Uint32 VanishPower_Bullet(Uint32 interval,void *param);
-Uint32 CreatAndMoveAndHitCheckBullet(Uint32 interval,void *param);
-void Draw(SDL_Surface *surface,int x,int y,int w,int h);
 void HitBrick(Board *board,Ball *ball,int NO);
-void ChangeColor(Ball *ball,Location location);
 void ChooseMod();
 void DeleteBall(Ball *HeadNode,Ball *DesertedBall,Board *board);
-void HitBoard(Board *board,Ball *ball,int NO);
 /*Uint32 AnalyseMSG(Uint32 interval,void *param);*/
 int MoveBoard(void *data);
-int MoveBall(void *data);
+int MoveBall(void *data,Message *MSG);
 const Uint8 *KeyValue;
 const int Window_Width=Block*18;
 const int Window_Depth=Block*15;
@@ -186,17 +184,19 @@ int main(){
     WaitForConnection();
     time_t BeginTime=time(NULL);
     while(1){
+        printf("Brickleft=%d\n",BrickLeft);
+        Message MSG;
         long int first=clock();
+        MoveBall(NULL,&MSG);
         Thread_listen(NULL);
-       Thread_send(NULL);
-        MoveBall(NULL);
-        printf("main:brickleft=%d\n",BrickLeft);
-        if(NextLevel(&BeginTime))  Server_NextLevel();
-        else if(IsVictory()) Server_Win();
+        Thread_send(NULL,240/PlayNum-(time(NULL)-BeginTime),MSG);
+        if(IsVictory()) Server_Win();
+        else if(NextLevel(&BeginTime))  Server_NextLevel();
         else if(IsLose(&BeginTime))  Server_Lose(NULL);
         if((FPS-(clock()-first)*1000/CLOCKS_PER_SEC)>0){
             SDL_Delay(FPS-(clock()-first)*1000/CLOCKS_PER_SEC);
         }
+        memset(&MSG,0,sizeof(Message));
     }
 }
 void WaitForConnection(){
@@ -253,42 +253,34 @@ void WaitForConnection(){
     Message MSG;
     MSG.IsWin=false;
     MSG.IsLose=false;
+    MSG.IsNextLevel=false;
     BallNumChange(&MSG);
     CopyMap(&MSG);
     CopyBoard(&MSG);
     CopyBall(&MSG);
     for(int i=0;i<PlayNum;i++){
-        printf("MSG.iswin=%d\n",MSG.IsWin);
         SendMSG(i,&MSG);
     }
     printf("send MSG init win\n");
 }
 
-
-
-void CreatThread(){
-    SDL_CreateThread(Thread_listen,"Thread_listen",(void*)NULL);
-    SDL_CreateThread(MoveBall,"MoveBall",(void*)NULL);
-        
-}
-
 int Thread_listen(void *data){
     struct timeval interval;
     interval.tv_sec=0;
-    interval.tv_usec=300;
+    interval.tv_usec=30;
     fd_set set;
     FD_ZERO(&set);
     for(int i=0;i<PlayNum;i++){
         FD_SET(Player_socket[i],&set);
     }
-    MessageFromClient MSG;
+        MessageFromClient MSG;
         fd_set readset=set;
         if(select(Player_socket[0]>Player_socket[1]?Player_socket[0]+1:Player_socket[1]+1,&readset,NULL,NULL,&interval)>0){
             for(int i=0;i<PlayNum;i++){
                 if(FD_ISSET(Player_socket[i],&readset)){
                     RecvMSG(i,&MSG);
-                    // recv then analyse        
-                    AnalyseMSG(i,&MSG);
+                    // recv then analyse
+                        AnalyseMSG(i,&MSG);
                 }else{
                     board[i].dx=0;
                     board[i].dy=0;
@@ -341,20 +333,17 @@ int Thread_listen(void *data){
     }
 
 
- int Thread_send(void *data){
-        Message MSG;
-        memset(&MSG,0,sizeof(Message));
+ int Thread_send(void *data,time_t TimeLeft,Message MSG){
         BallNumChange(&MSG);
         CopyMap(&MSG);
         CopyBoard(&MSG);
         CopyBall(&MSG);
         MSG.IsWin=false;
         MSG.IsLose=false;
-        /*MSG.IsNextLevel=(NextLevel()?true:false);
-        MSG.IsWin=((NextLevel()&&IsWin())?true:false);
-        MSG.IsLose=(IsLose()?true:false);
-        if(MSG.IsWin) WaitForResponse_Win();
-        if(MSG.IsLose) WaitForResponse_Lose();*/
+        MSG.IsNextLevel=false;
+        MSG.GetPower_Wall=(GetPower_Wall==true?true:false);
+        MSG.Score=Score;
+        MSG.TimeLeft=TimeLeft;
         for(int i=0;i<PlayNum;i++){
             SendMSG(i,&MSG);
         }
@@ -362,11 +351,10 @@ int Thread_listen(void *data){
 
  void SendMSG(int NO,Message *MSG){
     int sendbytes=send(Player_socket[NO],MSG,sizeof(Message),MSG_DONTWAIT);
-    if(sendbytes==0){
+    if(sendbytes==0&&Player_socket[NO]!=-1){
         fprintf(stderr,"Player%d\n disconnected",NO+1);
-        for(int i=0;i<PlayNum;i++){
-            close(Player_socket[i]);
-        }
+        close(Player_socket[NO]);
+        Player_socket[NO]=-1;
     }
  }
 
@@ -381,6 +369,7 @@ int Thread_listen(void *data){
  void CopyBoard(Message *MSG){
     for(int i=0;i<PlayNum;i++){
         MSG->board[i]=board[i];
+        //printf("board[%d].elem=%d\n",i,MSG->board[i].element);
     }
  }
 
@@ -392,6 +381,7 @@ int Thread_listen(void *data){
             MSG->ballMessage[i][j].dy=tmp->dy;
             MSG->ballMessage[i][j].x=tmp->x;
             MSG->ballMessage[i][j].y=tmp->y;
+            MSG->ballMessage[i][j].element=tmp->element;
             tmp=tmp->next;
         }
     }
@@ -433,16 +423,17 @@ void InitMap(int level){
 //一直重复a的原因：getkeyboardstate函数是以事件为基础的，不删除事件，这个按下了a就会一直在消息队列里
 
 
-int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖块
+int  MoveBall(void *data,Message *MSG){//有三种碰撞检测，撞边界，撞板，撞砖块
     for(int i=0;i<PlayNum;i++){
         Ball *tmp=board[i].HeadNode->next;
         while(tmp!=NULL){
             HitWall(board,tmp,i);
-            HitBoard(board,tmp,i);
+            HitBoard(board,tmp,i,MSG);
             HitBrick(board,tmp,i);
             if(tmp->dx==0&&tmp->dy==0){
                 tmp->x=board[i].x+board[i].w/2;
                 tmp->y=board[i].y-tmp->radius*2;
+                tmp->element=board[i].element;
             }else{
                 tmp->x+=tmp->dx;
                 tmp->y+=tmp->dy;
@@ -455,7 +446,7 @@ int  MoveBall(void *data){//有三种碰撞检测，撞边界，撞板，撞砖�
 }
 void GetPower(){
     for(int i=0;i<PlayNum;i++){
-        if(CountPower_Wall>=10){// 长时间的
+        if(CountPower_Wall>=3){// 长时间的
         GetPower_Wall=true;
         Power_ID[1]=SDL_AddTimer(5000,VanishPower_Wall,NULL);
         CountPower_Wall=0;
@@ -507,44 +498,61 @@ void ElementalAttack(Ball *ball,Location location){
     Brick *ToBeAttacked=&map[location.y][location.x];
     if(ToBeAttacked->element==fire){// 砖块是火元素
         if(ball->element==water||ball->element==thunder||ball->element==ice){//元素反应
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else{// 火火相碰
+            Score+=3;
+            printf("1\n");
             ToBeAttacked->HP-=1;
         }
     }else if(ToBeAttacked->element==water){// 砖块是水元素
         if(ball->element==fire){
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else if(ball->element==thunder){
             for(int i=location.y-1;i<=location.y+1;i++){
                 for(int j=location.x-1;j<=location.x+1;j++){
                     if(map[i][j].status==1){
-                        map[i][j].HP-=1;
+                        Score+=3;
+                        printf("2\n");
+                        map[i][j].HP-=2;
                     }
                 }
             }
         }else{
+            Score+=3;
+            printf("3\n");
             ToBeAttacked->HP-=1;
         }
     }else if(ToBeAttacked->element==thunder){// 砖块是雷元素
         if(ball->element==fire){
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else if(ball->element==water){
             for(int i=location.y-1;i<=location.y+1;i++){
                 for(int j=location.x-1;j<=location.x+1;j++){
                     if(map[i][j].status==1){
-                        map[i][j].HP-=1;
+                        Score+=3;
+                        printf("4\n");
+                        map[i][j].HP-=2;
                     }
                 }
             }
         }else if(ball->element==ice){
+            Score+=10;
+            ball->dy=-ball->dy;
             ToBeAttacked->HP-=4;
         }else{
+            Score+=2;
             ToBeAttacked->HP-=1;
         }
     }else if(ToBeAttacked->element==ice){
         if(ball->element==fire){
-            ToBeAttacked->HP-=2;
+            Score+=10;
+            ToBeAttacked->HP-=3;
         }else if(ball->element==thunder){
+            Score+=10;
+            ball->dy=-ball->dy;
             ToBeAttacked->HP-=4;
         }else{
             ToBeAttacked->HP-=1;
@@ -555,9 +563,10 @@ void ElementalAttack(Ball *ball,Location location){
     }
 }
 
+
 void DestroyBrick(){
-    for(int i=1;i<=Row;i++){
-        for(int j=1;j<=Col;j++){
+    for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
             if(map[i][j].status==1&&map[i][j].HP<=0){
                 map[i][j].status=0;
                 BrickLeft--;
@@ -572,7 +581,7 @@ void HitBrick(Board *board,Ball *ball,int NO){
     int y=ball->y;
     int col=x/Block+1;
     int row=y/Block+1;
-    if(col>=0&&col<=Col+1&&row>=0&&row<=Row+1){// 有碰撞的可能
+    if(col>0&&col<=Col+1&&row>=0&&row<Row+1){// 有碰撞的可能
         if(ball->x>=Block*(col-1)&&ball->x<=Block*col&&ball->y-ball->radius<=Block*(row-1)&&map[row-1][col].status==1){//上边碰撞
             location.x=col;
             location.y=row-1;
@@ -614,13 +623,14 @@ void HitBrick(Board *board,Ball *ball,int NO){
         /*这个地方误差值+3的引入很巧妙，肉眼无法观察，但完美解决了碰撞问题*/
     }
 }
-void HitBoard(Board *board,Ball *ball,int NO){
+void HitBoard(Board *board,Ball *ball,int NO,Message *MSG){
     for(int i=0;i<PlayNum;i++){
         if(ball->dy>0&&ball->x>=board[i].x&&ball->x<=board[i].x+board[i].w&&ball->y+ball->radius>=board[i].y-10&&ball->y+board[i].HeadNode->next->radius<=board[i].y+board[i].h*2){
             ball->dx=ball->dx+board[i].dx/3;
             ball->dy=-ball->dy+board[i].dy/6;
             ball->element=board[i].element;
             board[i].CountPower_NewBall++;
+            MSG->musicMessage.Music_HitBoard=true;
             if(board[i].CountPower_NewBall>=4&&board[i].BallNum<=3){
                 CreatBall(board[i].HeadNode,board[i].x+board[i].w/2,board[i].y-ball->radius*2,&board[i]);
                 board[i].HaveNewBallCreated=true;
@@ -690,18 +700,33 @@ void AdjustBoardLocation(int operation,Board *board_control,int times){
 void InitMap_2(){
     for(int i=0;i<Row+2;i++){
         for(int j=0;j<Col+2;j++){
-            if((i==2&&(j==3||j==4||j==9||j==10))||(i==3&&(j==2||j==5||j==8||j==11))||(i==6&&(j==4||j==9))||(i==7&&(j==5||j==6||j==7||j==8))){
-                map[i][j].element=rand()%5;
-                map[i][j].HP=MaxHp;
+            if((j==2&&(i==4||i==5))||(j==3&&(i==3||i==6))||(j==4&&(i==2||i==7))){
                 map[i][j].status=1;
+                map[i][j].element=fire;
+                map[i][j].HP=MaxHp;
+                BrickLeft++;
+            }else if((j==5&&(i==2||i==7))||(j==6&&(i==3||i==6))||(j==7&&(i==4||i==5))){
+                map[i][j].status=1;
+                map[i][j].element=water;
+                map[i][j].HP=MaxHp;
+                BrickLeft++;
+            }else if(j==12&&(i>=2&&i<=8)){
+                map[i][j].status=1;
+                map[i][j].element=thunder;
+                map[i][j].HP=MaxHp;
+                BrickLeft++;
+            }else if((j==13&&(i==2||i==5))||(j==14&&(i==2||i==5))||(j==14&&(i==3||i==4))){
+                map[i][j].status=1;
+                map[i][j].element=ice;
+                map[i][j].HP=MaxHp;
                 BrickLeft++;
             }else{
                 map[i][j].status=0;
             }
-        }
     }
     printf("map2:brickleft=%d\n",BrickLeft);
 };
+}
 
 Uint32 VanishPower_Wall(Uint32 interval,void *param){
     GetPower_Wall=false;
@@ -711,11 +736,11 @@ Uint32 VanishPower_Wall(Uint32 interval,void *param){
 
 void HitWall(Board *board,Ball *ball,int NO){
     Ball *tmp=ball;
-            if(tmp->x-tmp->radius<=0||tmp->x+tmp->radius>=Window_Width){// 左边碰撞或者右边碰撞
+            if((tmp->x-tmp->radius<=0&&tmp->dx<0)||(tmp->x+tmp->radius>=Window_Width&&tmp->dx>0)){// 左边碰撞或者右边碰撞
                 tmp->dx=-tmp->dx;
-            }else if(tmp->y-tmp->radius<=0){// 上边碰撞
+            }else if(tmp->y-tmp->radius<=0&&tmp->dy<0){// 上边碰撞
                 tmp->dy=-tmp->dy;
-            }else if(tmp->y+tmp->radius>=Window_Depth-Block*0.4){// 下边碰撞
+            }else if(tmp->y+tmp->radius>=Window_Depth-Block*0.6&&tmp->dy>0){// 下边碰撞
                 if(GetPower_Wall){// 用playnum来维护有多少个挡板
                     tmp->dy=-tmp->dy;
                 }else{// 没有墙壁
@@ -768,20 +793,23 @@ void InitBall(){
 
 
 
-void InitMap_1(){
+void InitMap_5(){
     for(int i=0;i<=Row+1;i++){
         for(int j=0;j<=Col+1;j++){
             if(i==0||i==Row+1||j==0||j==Col+1){
                 map[i][j].status=0;
-            }/*else{
+            }else if(i==1||i==j||i+j==10||i+j==19||i==j-9){
                 map[i][j].HP=MaxHp;
-                map[i][j].element=rand()%5;
-                map[i][j].status=rand()%2;
+                map[i][j].status=1;
                 BrickLeft++;
-            }*/else{
+                if(i==1) map[i][j].element=thunder;
+                else if(i==j) map[i][j].element=fire;
+                else if(i+j==10)  map[i][j].element=water;
+                else if(i+j==19)  map[i][j].element=thunder;
+                else if(i==j-9)  map[i][j].element=ice;
+            }else{
                 map[i][j].status=0;
             }
-
         }
     }
 }
@@ -799,8 +827,8 @@ void LimitBoard(Board *board){
         board->y=Window_Depth-Block*3;
         board->dy=0;
     }
-    if(board->y+board->h>=Window_Depth){
-        board->y=Window_Depth-board->h;
+    if(board->y+board->h>=Window_Depth-Block*0.5){
+        board->y=Window_Depth-board->h-Block*0.5;
         board->dy=0;
     }
 }
@@ -816,8 +844,10 @@ void BallNumChange(Message *MSG){
     for(int i=0;i<PlayNum;i++){
         if(board[i].HaveNewBallCreated){
             MSG->ballMessage[i][0].HaveNewBallCreated=true;
+            MSG->musicMessage.Music_CreatNewBall=true;
         }else{
             MSG->ballMessage[i][0].HaveNewBallCreated=false;
+            MSG->musicMessage.Music_CreatNewBall=false;
         }
         if(board[i].HaveNewBallDeleted){
             MSG->ballMessage[i][0].HaveNewBallDeleted=true;
@@ -829,36 +859,16 @@ void BallNumChange(Message *MSG){
     }    
 }
 
-/*void NextLevel(){
-    if(level<5){
-        level++;
-        ReInitGameobject(level);
-    }else{
-        Win();
-    }
-}*/
-
-/*void ReInitGameobject(int level){
-    for(int i=0;i<PlayNum;i++){
-        while(board[i].HeadNode->next!=NULL){
-            DeleteBall(board[i].HeadNode,board[i].HeadNode->next,&board[i]);
-        }
-    }
-    InitMap(level);
-    InitBoard();
-    InitBall();
-}
-
-void WaitForResponse_Win(){
-    
-}*/
 bool NextLevel(time_t *BeginTime){
     if(level<5&&BrickLeft<=0){
-        printf("next level jude succeed\n");
         level++;
         *BeginTime=time(NULL);
         return 1;
-    }else{
+    }else if(level==5&&BrickLeft<=0){
+        level++;
+        return 0;
+    }
+    else{
         return 0;
     }
 }
@@ -872,7 +882,7 @@ bool IsVictory(){
 }
 
 bool IsLose(time_t *BeginTime){
-    if(difftime(time(NULL),*BeginTime)>=120){
+    if(difftime(time(NULL),*BeginTime)>=240/PlayNum){
         return true ;
     }else {
         return false;
@@ -880,9 +890,9 @@ bool IsLose(time_t *BeginTime){
 }
 
 void Server_Win(){
-    Message *MSG;
+    Message MSG;
     memset(&MSG,0,sizeof(Message));
-    MSG->IsWin=true;
+    MSG.IsWin=true;
     for(int i=0;i<PlayNum;i++){
         send(Player_socket[i],&MSG,sizeof(Message),0);
     }
@@ -890,9 +900,9 @@ void Server_Win(){
 }
 
 void Server_Lose(){
-    Message *MSG;
+    Message MSG;
     memset(&MSG,0,sizeof(Message));
-    MSG->IsLose==true;
+    MSG.IsLose=true;
     for(int i=0;i<PlayNum;i++){
         send(Player_socket[i],&MSG,sizeof(Message),0);
     }
@@ -901,14 +911,29 @@ void Server_Lose(){
 void InitMap_3(){
     for(int i=0;i<=Row+1;i++){
         for(int j=0;j<=Col+1;j++){
-            if(((i==2&&(j==5||j==6||j==7||j==8||j==12)))||(i==3&&(j==4||j==9||j==11||j==12))||(i==4&&(j==3||j==10||j==12))||(i==5&&(j==4||j==9||j==11||j==12))||(i==6&&(j==5||j==6||j==7||j==8||j==12))){
+           if((j==2&&(i>=3&&i<=7))||(j==3&&i==5)||(j==4&&(i==4||i==6))||(j==5&&(i==3||i==7))){
                 map[i][j].HP=MaxHp;
-                map[i][j].element=rand()%5;
+                map[i][j].element=fire;
                 map[i][j].status=1;
                 BrickLeft++;
-            }else{
+           }else if((j==7&&(i>=3&&i<=7))||(i==7&&(j==8||j==9))){
+                map[i][j].HP=MaxHp;
+                map[i][j].element=water;
+                map[i][j].status=1;
+                BrickLeft++;
+           }else if((j==11&&(i>=3&&i<=7))||((j==12||j==13)&&(i==3||i==5||i==7))){
+                map[i][j].HP=MaxHp;
+                map[i][j].element=thunder;
+                map[i][j].status=1;
+                BrickLeft++;
+           }else if((j==15&&(i>=3&&i<=7))||((j==16||j==17)&&(i==3||i==5||i==7))){
+                map[i][j].HP=MaxHp;
+                map[i][j].element=ice;
+                map[i][j].status=1;
+                BrickLeft++;
+           }else{
                 map[i][j].status=0;
-            }
+           }
         }
     }
 }
@@ -927,23 +952,65 @@ void ReInitGameobject(int level){
 }
 
 void InitMap_4(){
-
+     for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if((i==1&&(j!=0&&j!=Col+1))||((j>i&&j<Col+1-i)&&i!=Row+1&&i!=0)){
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+                if(i>=1&&i<=2) map[i][j].element=ice;
+                else if(i>=3&&i<=4)  map[i][j].element=fire;
+                else if(i>=5&&i<=6)   map[i][j].element=thunder;
+                else if(i>=7&&i<=8)   map[i][j].element=water;
+            }else {
+                map[i][j].status=0;
+            }
+        }
+    }
 }
 
-void InitMap_5(){
-
+void InitMap_1(){
+    for(int i=0;i<=Row+1;i++){
+        for(int j=0;j<=Col+1;j++){
+            if(i==0||j==0||i==Row+1||j==Col+1){
+                map[i][j].status=0;
+            }else if((i==2||i==3)&&(j>=2&&j<=6)){
+                map[i][j].element=fire;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==4||i==5)&&(j>=8&&j<=12)){
+                map[i][j].element=water;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==2||i==3)&&(j>=13&&j<=17)){
+                map[i][j].element=thunder;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==6||i==7)&&(j>=2&&j<=6)){
+                map[i][j].element=ice;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }else if((i==6||i==7)&&(j>=13&&j<=17)){
+                map[i][j].element=normal;
+                map[i][j].HP=MaxHp;
+                map[i][j].status=1;
+                BrickLeft++;
+            }
+        }
+    }
 }
 
 void Server_NextLevel(){
-    printf("server:nextlevel\n,level=%d\n",level);
     Message MSG;
     memset(&MSG,0,sizeof(Message));
-    printf("ready\n");
     ReInitGameobject(level);
-    printf("reinit succeed\n");
     MSG.IsNextLevel=true;
+    printf("enter wrong\n");
     for(int i=0;i<PlayNum;i++){
         send(Player_socket[i],&MSG,sizeof(Message),0);
     }
-    printf("server;send succeed\n");
 }
